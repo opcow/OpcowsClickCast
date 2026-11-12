@@ -1,0 +1,103 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>html,body{margin:0;padding:0;background:#000}svg{display:block}</style></head>
+<body>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="40%" r="75%">
+      <stop offset="0" stop-color="#2a2140"/>
+      <stop offset="1" stop-color="#0c0a14"/>
+    </radialGradient>
+    <linearGradient id="hp1" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#d9a066"/><stop offset="1" stop-color="#8a5a2c"/></linearGradient>
+    <linearGradient id="hp2" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f2f2f2"/><stop offset="1" stop-color="#9a9a9a"/></linearGradient>
+    <linearGradient id="hp3" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#7fd0f0"/><stop offset="1" stop-color="#2f7fa8"/></linearGradient>
+    <linearGradient id="btn" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3a3350"/><stop offset="1" stop-color="#1c1828"/></linearGradient>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="7" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#000" flood-opacity="0.7"/>
+    </filter>
+  </defs>
+
+  <rect width="512" height="512" fill="url(#bg)"/>
+  <rect x="6" y="6" width="500" height="500" rx="58" fill="none" stroke="#c9a24a" stroke-width="6"/>
+
+  <!-- three party members: health bar, power bar, button row -->
+  <g filter="url(#shadow)">
+    <!-- member 1 -->
+    <rect x="66" y="58" width="380" height="118" rx="10" fill="#14111d" stroke="#4a4160" stroke-width="3"/>
+    <rect x="78" y="70" width="356" height="40" rx="4" fill="#2a2a2a"/>
+    <rect x="78" y="70" width="290" height="40" rx="4" fill="url(#hp1)"/>
+    <rect x="78" y="112" width="356" height="8" fill="#a33"/>
+    <!-- member 2 -->
+    <rect x="66" y="196" width="380" height="118" rx="10" fill="#14111d" stroke="#4a4160" stroke-width="3"/>
+    <rect x="78" y="208" width="356" height="40" rx="4" fill="#2a2a2a"/>
+    <rect x="78" y="208" width="170" height="40" rx="4" fill="url(#hp2)"/>
+    <rect x="248" y="208" width="70" height="40" fill="#3fbf6a" opacity="0.6"/>
+    <rect x="78" y="250" width="356" height="8" fill="#2f5bd0"/>
+    <!-- member 3 -->
+    <rect x="66" y="334" width="380" height="118" rx="10" fill="#14111d" stroke="#4a4160" stroke-width="3"/>
+    <rect x="78" y="346" width="356" height="40" rx="4" fill="#2a2a2a"/>
+    <rect x="78" y="346" width="320" height="40" rx="4" fill="url(#hp3)"/>
+    <rect x="78" y="388" width="356" height="8" fill="#2f5bd0"/>
+  </g>
+
+  <!-- button rows -->
+  <g stroke="#6b5f88" stroke-width="2.5">
+    <rect x="78"  y="126" width="40" height="40" rx="5" fill="url(#btn)"/>
+    <rect x="126" y="126" width="40" height="40" rx="5" fill="url(#btn)"/>
+    <rect x="174" y="126" width="40" height="40" rx="5" fill="url(#btn)"/>
+    <rect x="222" y="126" width="40" height="40" rx="5" fill="url(#btn)"/>
+    <rect x="270" y="126" width="40" height="40" rx="5" fill="url(#btn)"/>
+
+    <rect x="78"  y="264" width="40" height="40" rx="5" fill="url(#btn)"/>
+    <rect x="174" y="264" width="40" height="40" rx="5" fill="url(#btn)"/>
+    <rect x="222" y="264" width="40" height="40" rx="5" fill="url(#btn)"/>
+    <rect x="270" y="264" width="40" height="40" rx="5" fill="url(#btn)"/>
+
+    <rect x="78"  y="402" width="40" height="40" rx="5" fill="url(#btn)"/>
+    <rect x="126" y="402" width="40" height="40" rx="5" fill="url(#btn)"/>
+    <rect x="174" y="402" width="40" height="40" rx="5" fill="url(#btn)"/>
+    <rect x="222" y="402" width="40" height="40" rx="5" fill="url(#btn)"/>
+    <rect x="270" y="402" width="40" height="40" rx="5" fill="url(#btn)"/>
+  </g>
+
+  <!-- simple glyphs on buttons: holy cross, leaf, drop, sun, shield -->
+  <g fill="#e8d9a0" opacity="0.85">
+    <path d="M94 132h8v10h10v8h-10v10h-8v-10h-10v-8h10z"/>
+    <path d="M146 134c-10 6-12 18-6 26 8-2 14-12 6-26z"/>
+    <path d="M194 132c6 10 10 15 10 21a10 10 0 0 1-20 0c0-6 4-11 10-21z"/>
+    <circle cx="242" cy="146" r="8"/>
+    <path d="M276 134h28v12c0 9-7 14-14 16-7-2-14-7-14-16z"/>
+
+    <path d="M94 270h8v10h10v8h-10v10h-8v-10h-10v-8h10z"/>
+    <path d="M194 270c6 10 10 15 10 21a10 10 0 0 1-20 0c0-6 4-11 10-21z"/>
+    <circle cx="242" cy="284" r="8"/>
+    <path d="M276 272h28v12c0 9-7 14-14 16-7-2-14-7-14-16z"/>
+
+    <path d="M94 408h8v10h10v8h-10v10h-8v-10h-10v-8h10z"/>
+    <path d="M146 410c-10 6-12 18-6 26 8-2 14-12 6-26z"/>
+    <path d="M194 408c6 10 10 15 10 21a10 10 0 0 1-20 0c0-6 4-11 10-21z"/>
+    <circle cx="242" cy="422" r="8"/>
+    <path d="M276 410h28v12c0 9-7 14-14 16-7-2-14-7-14-16z"/>
+  </g>
+
+  <!-- the clicked button: glowing gold heal -->
+  <g filter="url(#glow)">
+    <rect x="122" y="260" width="48" height="48" rx="6" fill="#3a2f12" stroke="#ffd34d" stroke-width="4"/>
+    <path d="M140 266h12v14h14v12h-14v14h-12v-14h-14v-12h14z" fill="#ffe27a"/>
+  </g>
+  <!-- click burst -->
+  <g stroke="#ffe27a" stroke-width="5" stroke-linecap="round" opacity="0.9">
+    <line x1="146" y1="244" x2="146" y2="230"/>
+    <line x1="112" y1="258" x2="102" y2="248"/>
+    <line x1="180" y1="258" x2="190" y2="248"/>
+  </g>
+
+  <!-- mouse cursor -->
+  <g transform="translate(160 288) rotate(-8)" filter="url(#shadow)">
+    <path d="M0 0 L0 92 L24 70 L40 106 L58 98 L42 62 L74 62 Z" fill="#ffffff" stroke="#111" stroke-width="6" stroke-linejoin="round"/>
+  </g>
+</svg>
+</body></html>
