@@ -1,0 +1,12 @@
+## Interface: 16001
+## Title: Opcow's Click Cast
+## Version: 0.25.0
+## Notes: A party frame with spell and macro buttons under each member that cast on that member.
+## IconTexture: Interface\Icons\Spell_Holy_Heal
+## AddonCompartmentFunc: OpcowsClickCast_OnAddonCompartmentClick
+## AddonCompartmentFuncOnEnter: OpcowsClickCast_OnAddonCompartmentEnter
+## AddonCompartmentFuncOnLeave: OpcowsClickCast_OnAddonCompartmentLeave
+## SavedVariables: OpcowsClickCastSets
+## SavedVariablesPerCharacter: OpcowsClickCastDB
+OpcowsClickCast.lua
+Config.lua

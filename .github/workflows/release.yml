@@ -1,0 +1,25 @@
+# Packages the addon and uploads it to CurseForge when a version tag is pushed, ex: v0.25.0
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write     # for the GitHub release
+    env:
+      CF_API_KEY: ${{ secrets.CF_API_KEY }}
+      GITHUB_OAUTH: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0  # the packager reads the tags
+
+      - uses: BigWigsMods/packager@v2
+        with:
+          # zip and CurseForge name, ex: OpcowsClickCast-v0.25.0-forever
+          args: -n "{package-name}-{project-version}{classic}:{package-name}-{project-version}{classic}"
