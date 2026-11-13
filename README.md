@@ -13,11 +13,11 @@ Open the options window with `/occ`, the minimap button or the addon compartment
 - **Self only** buttons cast on you and show on your own frame only, ex: racials.
 - **Remind** (spells only) marks a buff to keep up. Out of combat, a member missing that buff gets its icon beside their frame, and the button glows orange. A buff from anyone counts, and so do the group versions, ex: Prayer of Fortitude for Power Word: Fortitude. Party buffs can't be read in combat, so reminders hide during a fight. Members who are dead, offline or out of sight are skipped.
 
-Each button shows the spell's cooldown. It also shows a swipe while your own buff or HoT from that spell is on the member, ex: Renew.
+Each button shows the spell's cooldown. It also shows a swipe while your own buff or HoT from that spell is on the member, ex: Renew. A button turns red while the member has a debuff that stops you casting its spell on them, ex: Weakened Soul for Power Word: Shield, with a swipe showing when it wears off. A dispel spell's button (Dispel Magic, Cure Disease, Remove Curse, Cure Poison, Purify, Cleanse) gets a border in the debuff's colour while the member has a debuff it can remove, in combat too.
 
 ## The frame
 
-Each member shows health, power, incoming heals, your buffs, dispellable debuff colours, threat, role icon and range. Class colours are optional. Click the bars to target the member.
+Each member shows health, power, incoming heals, your buffs, dispellable debuff colours, threat, role icon and range. A member out of range has faded bars and red buttons. Class colours are optional. Click the bars to target the member.
 
 When you target a friendly player who isn't in your party, a target frame shows under the party with the same buttons. It has a purple outline, so it can't be mistaken for a party member.
 

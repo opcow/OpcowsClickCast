@@ -22,6 +22,8 @@ local MIN_WIDTH = 100
 local SIZE = 24
 -- the alpha of an out of range member's bars
 local FADED = 0.4
+-- the red over a member out of range, see UpdateRange
+local FAR_RED = { 1, 0, 0, 0.4 }
 -- the alpha of the tint over a health bar for a dispellable debuff
 local DISPEL_ALPHA = 0.3
 -- the group header's attributes for each order of the members. In a party the player is index 0, so
@@ -98,6 +100,11 @@ local function DB()
     if db.dispelMine == nil then db.dispelMine = true end
     -- a swipe on a spell button while your buff from that spell is on the member, ex: Renew
     if db.swipes == nil then db.swipes = true end
+    -- a red mark on a spell button while a debuff stops you casting it on the member, see SetBlock
+    if db.blocked == nil then db.blocked = true end
+    -- a dispel spell's button glows while the member has a debuff it removes
+    if db.dispelGlow == nil then db.dispelGlow = true end
+    if db.rangeRed == nil then db.rangeRed = true end
     -- tooltips on the buttons, off: they cover the bars
     db.tooltips = db.tooltips and true or false
     -- a member's tooltip in the bottom right of the screen, as Blizzard's frames show it
@@ -507,6 +514,7 @@ local function UpdateRange(m)
     local u = m.unit
     if not u or u == "player" then
         m.body:SetAlpha(1)
+        m.farOverlay:SetAlpha(0)
         return
     end
     local ok, inRange, checked
@@ -517,6 +525,7 @@ local function UpdateRange(m)
         local inRangeOf = C_Spell and C_Spell.IsSpellInRange or IsSpellInRange
         if not id or not inRangeOf then
             m.body:SetAlpha(1)
+            m.farOverlay:SetAlpha(0)
             return
         end
         ok, inRange = pcall(inRangeOf, id, u)
@@ -528,12 +537,20 @@ local function UpdateRange(m)
         ok, inRange, checked = pcall(UnitInRange, u)
     end
     if not ok then return end
+    local red = DB().rangeRed
     if issecretvalue(inRange) then
         if m.body.SetAlphaFromBoolean then pcall(m.body.SetAlphaFromBoolean, m.body, inRange, 1, FADED) end
+        if red and m.farOverlay.SetAlphaFromBoolean then
+            pcall(m.farOverlay.SetAlphaFromBoolean, m.farOverlay, inRange, 0, 1)
+        else
+            m.farOverlay:SetAlpha(0)
+        end
         return
     end
     if issecretvalue(checked) then checked = true end
-    m.body:SetAlpha(checked and not inRange and FADED or 1)
+    local far = checked and not inRange
+    m.body:SetAlpha(far and FADED or 1)
+    m.farOverlay:SetAlpha(red and far and 1 or 0)
 end
 
 -- a border round the member in the threat colour Blizzard uses: yellow, orange, red when it has
@@ -746,10 +763,220 @@ local function MakeSwipes(m)
         return nil
     end
     m.swipeSlots = {}
+    m.blockSlots = {}
     return c
 end
 
 local NO_SPELLS = {}
+
+-- spells a debuff makes useless on someone (they're immune to it): the spell (any rank, matched by
+-- the name of its first rank's Classic id, or its English name, as this client's ids may differ),
+-- the debuff's id and English name, and how long the debuff lasts
+local BLOCKERS = {
+    { spell = 17, spellName = "Power Word: Shield", debuff = 6788, name = "Weakened Soul", duration = 15 },
+    { spell = 1022, spellName = "Blessing of Protection", debuff = 25771, name = "Forbearance", duration = 60 },
+    { spell = 498, spellName = "Divine Protection", debuff = 25771, name = "Forbearance", duration = 60 },
+    { spell = 642, spellName = "Divine Shield", debuff = 25771, name = "Forbearance", duration = 60 },
+}
+local BLOCK_COLOR = { 0.9, 0.1, 0.1, 0.55 }
+
+-- the entry of list (BLOCKERS or DISPELLERS) for spell id, or nil: by its English name or the
+-- name of its Classic id on this client
+local function SpellEntry(list, id)
+    local name = id and SpellName(id)
+    if not name then return nil end
+    name = name:lower()
+    for _, e in ipairs(list) do
+        local own = SpellName(e.spell)
+        if name == e.spellName:lower() or (own and own:lower() == name) then return e end
+    end
+    return nil
+end
+
+-- the BLOCKERS entry for spell id, or nil
+local function Blocker(id)
+    return SpellEntry(BLOCKERS, id)
+end
+
+-- spells that dispel debuffs from someone else, and the dispel types they remove
+local DISPELLERS = {
+    { spell = 527, spellName = "Dispel Magic", types = { Magic = true } },
+    { spell = 528, spellName = "Cure Disease", types = { Disease = true } },
+    { spell = 552, spellName = "Abolish Disease", types = { Disease = true } },
+    { spell = 1152, spellName = "Purify", types = { Disease = true, Poison = true } },
+    { spell = 4987, spellName = "Cleanse", types = { Magic = true, Disease = true, Poison = true } },
+    { spell = 2782, spellName = "Remove Curse", types = { Curse = true } },
+    { spell = 475, spellName = "Remove Lesser Curse", types = { Curse = true } },
+    { spell = 8946, spellName = "Cure Poison", types = { Poison = true } },
+    { spell = 2893, spellName = "Abolish Poison", types = { Poison = true } },
+}
+
+-- the dispel types spell id removes, as a set for includeDispelTypes, or nil
+local function DispelTypes(id)
+    local e = SpellEntry(DISPELLERS, id)
+    return e and e.types or nil
+end
+
+-- the lower case names the blocker's debuff can have: this client's and the English one
+local function BlockNames(e)
+    local names = { [e.name:lower()] = true }
+    local n = SpellName(e.debuff)
+    if n then names[n:lower()] = true end
+    return names
+end
+
+-- the debuff ids that stop the blocker's spell, as a set for includeSpellIDs: the known one and
+-- any seen on this client, see LearnBlock
+local function BlockIDs(e)
+    if not e then return nil end
+    local ids = { [e.debuff] = true }
+    local learned = DB().blockLearned
+    if learned and learned[e.name] then ids[learned[e.name]] = true end
+    return ids
+end
+
+-- the can't-cast mark: a red wash over a button
+local function MarkBlocked(button)
+    local t = button:CreateTexture(nil, "OVERLAY")
+    t:SetAllPoints()
+    t:SetColorTexture(BLOCK_COLOR[1], BLOCK_COLOR[2], BLOCK_COLOR[3], BLOCK_COLOR[4])
+    return t
+end
+
+-- the blocker of what a click on button b casts right now: its shift-click action's while shift is held
+local function ActiveBlocker(b)
+    if IsShiftKeyDown() then return b.shiftBlocker end
+    return b.blocker
+end
+
+-- a button's container slots come in pairs, one for its click's spell and one for its shift-click's:
+-- only the pair's one for what a click casts now is seen
+local SHIFT_SLOTS = { { "blockSlot", "shiftBlockSlot" }, { "dispelSlot", "shiftDispelSlot" } }
+local function ShowBlockSlots(b)
+    local shift = IsShiftKeyDown() and true or false
+    for _, pair in ipairs(SHIFT_SLOTS) do
+        local click, sh = b[pair[1]], b[pair[2]]
+        if click then pcall(click.SetAlpha, click, shift and 0 or 1) end
+        if sh then pcall(sh.SetAlpha, sh, shift and 1 or 0) end
+    end
+end
+
+-- member m's swipes container's slot key, made the first time with aura filter filter, initializeFrame
+-- init and frame level m's + level. It takes nothing until it's given candidate filters.
+local function ButtonSlot(m, key, filter, init, level)
+    local slot = m.blockSlots[key]
+    if slot then return slot end
+    slot = m.swipes:AddAuraSlot(key, filter, {
+        candidateFilters = { includeSpellIDs = NO_SPELLS },
+        initializeFrame = function(button)
+            -- clicks and hovering go through to the spell button
+            pcall(button.SetMouseClickEnabled, button, false)
+            pcall(button.SetMouseMotionEnabled, button, false)
+            init(button)
+        end,
+    })
+    pcall(slot.SetFrameLevel, slot, m:GetFrameLevel() + level)
+    m.blockSlots[key] = slot
+    return slot
+end
+
+-- one of SetBlock's marks over button b, the i-th of member m's: its key is prefix .. i, and fields
+-- names b's fields for its debuff ids, its slot and the ids it was last given
+local function SetBlockSlot(m, i, b, prefix, fields)
+    local c = m.swipes
+    if not c then return end
+    local ok, err = pcall(function()
+        local key = prefix .. i
+        -- over the buff swipe
+        local slot = ButtonSlot(m, key, "HARMFUL", function(button)
+            MarkBlocked(button)
+            local cd = CreateFrame("Cooldown", nil, button, "CooldownFrameTemplate")
+            cd:SetAllPoints()
+            cd:SetDrawEdge(false)
+            cd:SetHideCountdownNumbers(true)
+            button:SetDurationCooldown(cd)
+        end, 13)
+        b[fields.slot] = slot
+        slot:ClearAllPoints()
+        slot:SetAllPoints(b)
+        local ids = DB().blocked and b:IsShown() and b[fields.ids] or nil
+        if b[fields.shown] ~= ids then
+            b[fields.shown] = ids
+            c:SetAuraSlotCandidateFilters(key, { includeSpellIDs = ids or NO_SPELLS })
+        end
+    end)
+    if not ok then AuraError(err) end
+end
+
+-- the marks over button b, the i-th of member m's, show while the member has a debuff that stops
+-- you casting b's spell on them, ex: Weakened Soul on Power Word: Shield. A swipe shows the debuff's
+-- time left, like a cooldown. In the swipes' container, so it works in combat. There's one for the
+-- click's spell and one for the shift-click's. Out of combat.
+local function SetBlock(m, i, b)
+    SetBlockSlot(m, i, b, "x", { ids = "blockIDs", slot = "blockSlot", shown = "blockShown" })
+    SetBlockSlot(m, i, b, "y", { ids = "shiftBlockIDs", slot = "shiftBlockSlot", shown = "shiftBlockShown" })
+    ShowBlockSlots(b)
+end
+
+-- the dispel glow: a border round a button, coloured by the game in the dispel type of the debuff
+local DISPEL_EDGE = 2
+local function DispelBorder(button)
+    local edges = {
+        { "TOPLEFT", "TOPRIGHT", nil, DISPEL_EDGE },
+        { "BOTTOMLEFT", "BOTTOMRIGHT", nil, DISPEL_EDGE },
+        { "TOPLEFT", "BOTTOMLEFT", DISPEL_EDGE, nil },
+        { "TOPRIGHT", "BOTTOMRIGHT", DISPEL_EDGE, nil },
+    }
+    local out = {}
+    for _, e in ipairs(edges) do
+        local t = button:CreateTexture(nil, "OVERLAY")
+        t:SetPoint(e[1])
+        t:SetPoint(e[2])
+        if e[3] then t:SetWidth(e[3]) end
+        if e[4] then t:SetHeight(e[4]) end
+        t:SetTexture("Interface\\Buttons\\WHITE8X8")
+        if button.AddDispelTypeTexture then
+            local ok, err = pcall(function()
+                button:AddDispelTypeTexture(t, { style = Enum.CustomAuraButtonDispelTypeTextureStyle.PreserveAsset,
+                    showWhenHarmful = true, showWithoutDispelType = false })
+            end)
+            if not ok then AuraError(err) end
+        end
+        table.insert(out, t)
+    end
+    return out
+end
+
+-- one of SetDispel's glows over button b, the i-th of member m's: like SetBlockSlot, with the debuff
+-- types b's spell dispels
+local function SetDispelSlot(m, i, b, prefix, fields)
+    local c = m.swipes
+    if not c then return end
+    local ok, err = pcall(function()
+        local key = prefix .. i
+        -- RAID: only debuffs you can dispel. Over the can't-cast mark.
+        local slot = ButtonSlot(m, key, "HARMFUL|RAID", DispelBorder, 14)
+        b[fields.slot] = slot
+        slot:ClearAllPoints()
+        slot:SetAllPoints(b)
+        local types = DB().dispelGlow and b:IsShown() and b[fields.types] or nil
+        if b[fields.shown] ~= types then
+            b[fields.shown] = types
+            c:SetAuraSlotCandidateFilters(key, types and { includeDispelTypes = types }
+                or { includeSpellIDs = NO_SPELLS })
+        end
+    end)
+    if not ok then AuraError(err) end
+end
+
+-- the glows round button b, the i-th of member m's, show while the member has a debuff its spell can
+-- dispel, in the debuff type's colour, ex: Dispel Magic glows blue on magic. In combat too. One for
+-- the click's spell and one for the shift-click's, like SetBlock. Out of combat.
+local function SetDispel(m, i, b)
+    SetDispelSlot(m, i, b, "d", { types = "dispelTypes", slot = "dispelSlot", shown = "dispelShown" })
+    SetDispelSlot(m, i, b, "e", { types = "shiftDispelTypes", slot = "shiftDispelSlot", shown = "shiftDispelShown" })
+    ShowBlockSlots(b)
+end
 
 -- the swipe over button b, the i-th of member m's, shows your buff from b's spell. Out of combat.
 local function SetSwipe(m, i, b)
@@ -834,19 +1061,19 @@ local function BuffNames(name)
     return names
 end
 
--- the unit's buffs, { names = { [lower case name] = true }, ids = { [spell id] = true } }, or nil
--- when they can't be read
-local function UnitBuffs(u)
+-- the unit's buffs (or debuffs with filter "HARMFUL"), { names = { [lower case name] = aura },
+-- ids = { [spell id] = aura } }, or nil when they can't be read
+local function UnitBuffs(u, filter)
     if not (C_UnitAuras and C_UnitAuras.GetAuraDataByIndex) then return nil end
     local have = { names = {}, ids = {} }
     for i = 1, 255 do
-        local ok, aura = pcall(C_UnitAuras.GetAuraDataByIndex, u, i, "HELPFUL")
+        local ok, aura = pcall(C_UnitAuras.GetAuraDataByIndex, u, i, filter or "HELPFUL")
         if not ok or issecretvalue(aura) then return nil end
         if not aura then break end
         local name, id = aura.name, aura.spellId
         if issecretvalue(name) or issecretvalue(id) then return nil end
-        if type(name) == "string" then have.names[name:lower()] = true end
-        if id then have.ids[id] = true end
+        if type(name) == "string" then have.names[name:lower()] = aura end
+        if id then have.ids[id] = aura end
     end
     return have
 end
@@ -947,6 +1174,143 @@ local function UpdateReminders(m)
     ShowReminders(m, missing, u and Known(UnitName(u)))
 end
 
+-- can't-cast marks, read by this addon --------------------------------------------------------------
+
+-- The swipes container marks a button in combat, if the game lets it pick out the debuff (see
+-- SetBlock). Besides that, the addon marks it itself: from the member's debuffs when they can be
+-- read (out of combat), and for the debuff's length after you cast the spell on them (in combat too).
+
+-- a number that isn't secret, or nil
+local function Num(v)
+    if type(v) == "number" and not issecretvalue(v) then return v end
+    return nil
+end
+
+-- button b's own mark, for what a click on it casts now (see ActiveBlocker): shown while that
+-- spell's debuff is on the member, with a swipe for its time left. b.blockTimes holds each debuff's
+-- { start, ends } (GetTime), by name.
+local function RefreshBlock(b)
+    local e = ActiveBlocker(b)
+    local t = e and b.blockTimes and b.blockTimes[e.name]
+    if not (t and t.ends > GetTime()) then
+        if b.blockMark then b.blockMark:Hide() end
+        return
+    end
+    local f = b.blockMark
+    if not f then
+        f = CreateFrame("Frame", nil, b)
+        f:SetAllPoints()
+        -- over the cooldown and the swipes, under the rank number, see NewButton
+        f:SetFrameLevel(b:GetFrameLevel() + 3)
+        MarkBlocked(f)
+        f.cd = CreateFrame("Cooldown", nil, f, "CooldownFrameTemplate")
+        f.cd:SetAllPoints()
+        f.cd:SetDrawEdge(false)
+        f.cd:SetHideCountdownNumbers(true)
+        b.blockMark = f
+    end
+    f:Show()
+    pcall(f.cd.SetCooldown, f.cd, t.start, t.ends - t.start)
+end
+
+-- the member of button b has blocker e's debuff from start to ends (GetTime); no ends: they don't
+local function SetBlockTime(b, e, start, ends)
+    b.blockTimes = b.blockTimes or {}
+    if not ends or ends <= GetTime() then
+        b.blockTimes[e.name] = nil
+    else
+        local t = { start = start, ends = ends }
+        b.blockTimes[e.name] = t
+        C_Timer.After(ends - GetTime() + 0.05, function()
+            if b.blockTimes and b.blockTimes[e.name] == t and t.ends <= GetTime() then
+                b.blockTimes[e.name] = nil
+                RefreshBlock(b)
+            end
+        end)
+    end
+end
+
+-- button b's marks go, ex: its frame shows someone else now
+local function ClearBlocks(b)
+    b.blockTimes = nil
+    RefreshBlock(b)
+end
+
+-- the debuff seen for blocker e has spell id id: keep it, so the swipes container looks for it too
+local function LearnBlock(e, id)
+    id = Num(id)
+    if not id or id == e.debuff then return end
+    local db = DB()
+    db.blockLearned = db.blockLearned or {}
+    if db.blockLearned[e.name] == id then return end
+    db.blockLearned[e.name] = id
+    Print(("%s is spell %d on this client, not %d: the marks use it now."):format(e.name, id, e.debuff))
+    if SyncSoon then SyncSoon() end
+end
+
+-- the blockers of button b's click and shift-click, each once
+local function ButtonBlockers(b)
+    local list = {}
+    if b.blocker then table.insert(list, b.blocker) end
+    if b.shiftBlocker and b.shiftBlocker ~= b.blocker then table.insert(list, b.shiftBlocker) end
+    return list
+end
+
+-- member m's marks from their debuffs, when those can be read. When they can't (secret in combat),
+-- the marks stay as they are, each going when its time is up.
+local function UpdateBlocks(m)
+    local u = m.unit
+    local have
+    -- the frame shows someone else now: their marks aren't the last one's
+    local moved = m.blockUnit ~= u
+    m.blockUnit = u
+    for _, b in ipairs(buttons[m] or {}) do
+        local list = ButtonBlockers(b)
+        if moved then b.blockTimes = nil end
+        if not (#list > 0 and DB().blocked and b:IsShown() and u) then
+            b.blockTimes = nil
+        else
+            if have == nil then have = UnitBuffs(u, "HARMFUL") or false end
+            if have then
+                for _, e in ipairs(list) do
+                    local aura
+                    for name in pairs(BlockNames(e)) do aura = aura or have.names[name] end
+                    for id in pairs(BlockIDs(e)) do aura = aura or have.ids[id] end
+                    if aura then
+                        LearnBlock(e, aura.spellId)
+                        local ends, length = Num(aura.expirationTime), Num(aura.duration)
+                        if ends and ends > 0 and length and length > 0 then
+                            SetBlockTime(b, e, ends - length, ends)
+                        else
+                            -- no time on it: until the next look at their debuffs
+                            SetBlockTime(b, e, GetTime(), GetTime() + e.duration)
+                        end
+                    else
+                        SetBlockTime(b, e, nil)
+                    end
+                end
+            end
+        end
+        RefreshBlock(b)
+    end
+end
+
+-- you cast blocker e's spell from button b: its member has the debuff now, for its whole length.
+-- Every button with that spell on their frame, as a click or a shift-click, is marked.
+local function BlockFromCast(b, e)
+    local m = b:GetParent()
+    if not (m and e and DB().blocked) then return end
+    local now = GetTime()
+    for _, o in ipairs(buttons[m] or {}) do
+        if o:IsShown() and not o.selfOnly then
+            for _, oe in ipairs(ButtonBlockers(o)) do
+                if oe.name == e.name then SetBlockTime(o, oe, now, now + e.duration) end
+            end
+            RefreshBlock(o)
+        end
+    end
+end
+
 -- what decides whether member m's reminders can show, besides their buffs: checked a few times a
 -- second, as nothing fires when a member comes into sight
 local function ReminderState(m)
@@ -980,6 +1344,7 @@ local function Watch(m)
     SetAuraUnit(m)
     UpdateMember(m)
     UpdateReminders(m)
+    UpdateBlocks(m)
 end
 
 local function Bar(parent)
@@ -1080,6 +1445,15 @@ local function MakeMember(m)
     threat:Hide()
     m.threat = threat
 
+    -- red over the buttons while the member is out of range, see UpdateRange. Each button gets a
+    -- red square on it, see NewButton. Above the buttons and their marks (up to m + 14), and it
+    -- doesn't take the mouse, so clicks go through.
+    local far = CreateFrame("Frame", nil, m)
+    far:SetAllPoints()
+    far:SetFrameLevel(m:GetFrameLevel() + 20)
+    far:SetAlpha(0)
+    m.farOverlay = far
+
     m.dispel = MakeDispel(m)
     m.debuffs = MakeAuras(m, true)
     m.buffs = MakeAuras(m, false)
@@ -1097,6 +1471,7 @@ local function MakeMember(m)
         elseif event == "UNIT_AURA" then
             -- secret in combat, see UpdateReminders
             if not fighting then UpdateReminders(m) end
+            UpdateBlocks(m)
         else
             UpdateHealth(m)
         end
@@ -1315,16 +1690,21 @@ end
 local function UpdateTargetFrame()
     if not target then return end
     -- in combat the driver may show you, or (its [party] seen to fail on Forever) a party member the
-    -- party frame shows already: then the frame is see-through, as it can't be hidden. In a party,
-    -- UnitInParty covers you too. In a raid the party frame is only your subgroup, so only you.
-    local me = false
-    if InCombatLockdown() then
-        if IsInGroup() and not IsInRaid() then
-            local ok, v = pcall(UnitInParty, "target")
-            me = ok and v or false
-        else
-            me = UnitIsUnit("target", "player")
-        end
+    -- party frame shows already: then the frame is see-through, as it can't be hidden. That's worked
+    -- out out of combat too, since the driver shows the frame as combat starts with no target change:
+    -- a party member targeted before the pull showed. In a party, UnitInParty covers you too. In a
+    -- raid the party frame is only your subgroup, so only you.
+    local ok, me
+    if IsInGroup() and not IsInRaid() then
+        ok, me = pcall(UnitInParty, "target")
+    else
+        ok, me = pcall(UnitIsUnit, "target", "player")
+    end
+    -- secret stays secret for SetAlphaFromBoolean below
+    if not ok then
+        me = false
+    elseif not issecretvalue(me) then
+        me = me and true or false
     end
     if previewOn then
         target:SetAlpha(0)
@@ -1405,6 +1785,8 @@ end
 local rightCast
 -- the player is casting or channelling
 local casting = false
+-- the last click on a button whose spell leaves a debuff, and when, see BlockFromCast
+local blockClick, blockClickBlocker, blockClickTime
 
 -- the spell's own cooldown on button b, not the global cooldown: the shift-click spell's while shift
 -- is held. Duration objects can be secret in combat, they only go to the Cooldown frame.
@@ -1446,6 +1828,9 @@ local function ShowRank(b)
         icon, r, other = b.shiftIcon, b.shiftRank, true
     end
     b.icon:SetTexture(icon)
+    -- the can't-cast mark of the spell shown
+    RefreshBlock(b)
+    ShowBlockSlots(b)
     b.rankText:SetText(r and tostring(r) or "")
     if other then
         b.rankText:SetTextColor(1, 0.82, 0)
@@ -1475,7 +1860,52 @@ local function EndRightCast()
     if b then ShowRank(b) end
 end
 
+-- the game's Auto Self Cast casts a helpful spell on you when the member it's aimed at can't take
+-- it, ex: out of range or out of sight. A button casts on its member or not at all: Auto Self Cast
+-- is off for the click and goes back to how it was set after it. The value it was set to, nil when
+-- it hasn't been changed.
+local savedSelfCast
+
+local function GetSelfCast()
+    local ok, v = pcall(function()
+        if C_CVar and C_CVar.GetCVar then return C_CVar.GetCVar("autoSelfCast") end
+        return GetCVar("autoSelfCast")
+    end)
+    return ok and v or nil
+end
+
+local function SetSelfCast(v)
+    pcall(function()
+        if C_CVar and C_CVar.SetCVar then C_CVar.SetCVar("autoSelfCast", v) else SetCVar("autoSelfCast", v) end
+    end)
+end
+
+local function RestoreSelfCast()
+    if not savedSelfCast then return end
+    SetSelfCast(savedSelfCast)
+    savedSelfCast = nil
+end
+
+-- With Auto Self Cast off, the game puts a spell the member can't take on the cursor for you to
+-- pick a target instead. Taking it off the cursor (SpellStopTargeting) is for Blizzard's UI only:
+-- an addon calling it gets blocked.
+local function PreClick(self)
+    -- a self only button casts on you anyway
+    if self.selfOnly or savedSelfCast then return end
+    local v = GetSelfCast()
+    if v and v ~= "0" then
+        savedSelfCast = v
+        SetSelfCast("0")
+        -- in case PostClick never runs
+        C_Timer.After(0, RestoreSelfCast)
+    end
+end
+
 local function PostClick(self, button, down)
+    RestoreSelfCast()
+    -- a spell that leaves a debuff on the member, ex: Power Word: Shield: mark them once it's cast
+    local e = ActiveBlocker(self)
+    if e then blockClick, blockClickBlocker, blockClickTime = self, e, GetTime() end
     -- with shift held, either button does the shift-click action, unless shift-right-click has its own
     local shiftRight = IsShiftKeyDown() and self.shiftRightRank
     if button == "RightButton" and self.rightRank and (shiftRight or not IsShiftKeyDown()) then
@@ -1515,6 +1945,17 @@ local function NewButton(m, preview)
     b.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
     b:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
     b:SetFrameLevel(m:GetFrameLevel() + 10)
+    -- its red square while the member is out of range, on the member's overlay (see MakeMember),
+    -- shown while the button is
+    if m.farOverlay then
+        local t = m.farOverlay:CreateTexture(nil, "OVERLAY")
+        t:SetAllPoints(b)
+        t:SetColorTexture(FAR_RED[1], FAR_RED[2], FAR_RED[3], FAR_RED[4])
+        t:SetShown(b:IsShown())
+        b:HookScript("OnShow", function() t:Show() end)
+        b:HookScript("OnHide", function() t:Hide() end)
+        b.farTex = t
+    end
     -- the spell's cooldown, under the buff swipe (m + 12, see MakeSwipes)
     b.cooldown = CreateFrame("Cooldown", nil, b, "CooldownFrameTemplate")
     b.cooldown:SetAllPoints()
@@ -1527,6 +1968,7 @@ local function NewButton(m, preview)
     b.rankText = text:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
     b.rankText:SetPoint("BOTTOMRIGHT", -1, 1)
     if preview then return b end
+    b:SetScript("PreClick", PreClick)
     b:SetScript("PostClick", PostClick)
     -- the template casts on the press or the release, whichever the game is set to
     b:RegisterForClicks("AnyUp", "AnyDown")
@@ -1556,7 +1998,8 @@ local function SetUp(b, a)
     b.label, b.mainIcon, b.rank, b.rightRank = nil, nil, nil, nil
     b.shiftLabel, b.shiftIcon, b.shiftRank, b.shiftRightRank = nil, nil, nil, nil
     b.spellIDs, b.spellID, b.cdSpell, b.shiftCdSpell = nil, nil, nil, nil
-    b.remind, b.remindNames = nil, nil
+    b.remind, b.remindNames, b.blockIDs, b.blocker = nil, nil, nil, nil
+    b.shiftBlockIDs, b.shiftBlocker, b.dispelTypes, b.shiftDispelTypes = nil, nil, nil, nil
     b.rankText:SetText("")
     -- a self only button casts on you whichever member it's on: its own unit comes before its
     -- parent's (useparent-unit). For racials and other spells you can only cast on yourself.
@@ -1575,6 +2018,12 @@ local function SetUp(b, a)
         -- the swipe shows your buff from any rank of it, see SetSwipe
         b.spellIDs = {}
         for _, r in ipairs(Book()[a.spell:lower()]) do b.spellIDs[r.id] = true end
+        -- marked while a debuff stops it on the member, see SetBlock. A self only button casts on
+        -- you, so the member's debuffs don't matter.
+        if not a.self then b.blocker = Blocker(main.id) end
+        b.blockIDs = BlockIDs(b.blocker)
+        -- glows while the member has a debuff it dispels, see SetDispel
+        b.dispelTypes = DispelTypes(main.id)
         -- a reminder when its buff is missing on the member, see UpdateReminders
         if a.remind then
             b.remind = true
@@ -1590,6 +2039,9 @@ local function SetUp(b, a)
         b.label = "Macro: " .. a.macro
         b.mainIcon = icon or 134400
         b.cdSpell = MacroSpell(a.macro)
+        if not a.self then b.blocker = Blocker(b.cdSpell) end
+        b.blockIDs = BlockIDs(b.blocker)
+        b.dispelTypes = DispelTypes(b.cdSpell)
     else
         return false
     end
@@ -1616,6 +2068,10 @@ local function SetUp(b, a)
         SetClick(b, true, "*", b:GetAttribute("type1"), b:GetAttribute("spell1"))
         b.shiftLabel, b.shiftIcon, b.shiftRank, b.shiftCdSpell = b.label, b.mainIcon, b.rank, b.cdSpell
     end
+    -- the shift-click's spell has its own mark, seen while shift is held
+    if not a.self then b.shiftBlocker = Blocker(b.shiftCdSpell) end
+    b.shiftBlockIDs = BlockIDs(b.shiftBlocker)
+    b.shiftDispelTypes = DispelTypes(b.shiftCdSpell)
     ShowRank(b)
     return true
 end
@@ -1747,7 +2203,7 @@ local PREVIEW = {
     { name = "Tankard", class = "WARRIOR", role = "TANK", health = 0.72, power = 0.4, powerType = "RAGE",
         threat = 3, buff = true, unbuffed = true },
     { name = "Thistle", class = "ROGUE", role = "DAMAGER", health = 0.45, power = 0.8, powerType = "ENERGY",
-        curse = true, mine = 0.2, others = 0.1, buff = true },
+        curse = true, mine = 0.2, others = 0.1, buff = true, blocked = true },
     { name = "Emberly", class = "MAGE", role = "DAMAGER", health = 0.9, power = 0.6, powerType = "MANA",
         far = true },
     { name = "Gravel", class = "HUNTER", role = "DAMAGER", health = 0, power = 0, powerType = "MANA",
@@ -1861,7 +2317,23 @@ local function FillPreview(m, p, list, n)
         end
     end
     ShowReminders(m, missing, name)
+    -- one member has a debuff that stops a spell, ex: Weakened Soul for Power Word: Shield
+    for i, b in ipairs(list) do
+        local on = db.blocked and p.blocked and i <= n and b.blockIDs and true or false
+        if on and not b.previewBlock then b.previewBlock = MarkBlocked(b) end
+        if b.previewBlock then b.previewBlock:SetShown(on) end
+        -- the curse makes buttons that remove curses glow purple
+        local glow = db.dispelGlow and p.curse and i <= n and b.dispelTypes and b.dispelTypes.Curse and true or false
+        if glow and not b.previewGlow then
+            b.previewGlow = CreateFrame("Frame", nil, b)
+            b.previewGlow:SetAllPoints()
+            b.previewGlow:SetFrameLevel(b:GetFrameLevel() + 4)
+            for _, t in ipairs(DispelBorder(b.previewGlow)) do t:SetVertexColor(CURSE[1], CURSE[2], CURSE[3]) end
+        end
+        if b.previewGlow then b.previewGlow:SetShown(glow) end
+    end
     m.body:SetAlpha(p.far and FADED or 1)
+    m.farOverlay:SetAlpha(db.rangeRed and p.far and 1 or 0)
 end
 
 -- shows or hides the preview, laid out by the options as they are now. Not protected, so it can end
@@ -1944,8 +2416,13 @@ function OCC.Sync()
         m.isMe = IsMe(m)
         local list, n = LayoutMember(m, d, m.isMe, NewButton)
         SetAuraUnit(m)
-        for i = 1, #list do SetSwipe(m, i, list[i]) end
+        for i = 1, #list do
+            SetSwipe(m, i, list[i])
+            SetBlock(m, i, list[i])
+            SetDispel(m, i, list[i])
+        end
         UpdateReminders(m)
+        UpdateBlocks(m)
         -- for the target frame's range, see UpdateRange. Self only buttons don't reach the target.
         m.rangeSpell = nil
         for i = n, 1, -1 do
@@ -1998,7 +2475,20 @@ end
 
 -- the player's casts, to show a right-click's lower rank until its cast ends
 local castFrame = CreateFrame("Frame")
-castFrame:SetScript("OnEvent", function(_, event)
+castFrame:SetScript("OnEvent", function(_, event, _, _, spellID)
+    if event == "UNIT_SPELLCAST_SUCCEEDED" then
+        -- a blocked spell just clicked went off: its member has the debuff now. A secret spell id
+        -- can't be checked, so the click is trusted.
+        local b = blockClick
+        if b and GetTime() - blockClickTime < 1 then
+            local id = Num(spellID)
+            local e = id and Blocker(id)
+            if not issecretvalue(spellID) and not (e and e.name == blockClickBlocker.name) then return end
+            blockClick = nil
+            BlockFromCast(b, blockClickBlocker)
+        end
+        return
+    end
     if event == "UNIT_SPELLCAST_START" or event == "UNIT_SPELLCAST_CHANNEL_START" then
         casting = true
     else
@@ -2007,7 +2497,8 @@ castFrame:SetScript("OnEvent", function(_, event)
     end
 end)
 for _, e in ipairs({ "UNIT_SPELLCAST_START", "UNIT_SPELLCAST_CHANNEL_START", "UNIT_SPELLCAST_STOP",
-    "UNIT_SPELLCAST_CHANNEL_STOP", "UNIT_SPELLCAST_FAILED", "UNIT_SPELLCAST_INTERRUPTED" }) do
+    "UNIT_SPELLCAST_CHANNEL_STOP", "UNIT_SPELLCAST_FAILED", "UNIT_SPELLCAST_INTERRUPTED",
+    "UNIT_SPELLCAST_SUCCEEDED" }) do
     pcall(castFrame.RegisterUnitEvent, castFrame, e, "player")
 end
 
@@ -2152,6 +2643,27 @@ end
 function OCC.SetSwipes(on)
     DB().swipes = on and true or false
     Changed()
+end
+
+-- a red mark on a spell button while a debuff stops you casting it on the member. Out of combat
+-- only, see Sync.
+function OCC.SetBlocked(on)
+    DB().blocked = on and true or false
+    Changed()
+end
+
+-- a dispel spell's button glows in the colour of a debuff it can remove. Out of combat only, see Sync.
+function OCC.SetDispelGlow(on)
+    DB().dispelGlow = on and true or false
+    Changed()
+end
+
+-- red over a member out of range. Not protected, so it changes in combat too: the range check
+-- every 0.25s and the preview pick it up.
+function OCC.SetRangeRed(on)
+    DB().rangeRed = on and true or false
+    UpdatePreview()
+    if OCC.RefreshConfig then OCC.RefreshConfig() end
 end
 
 -- tooltips on the buttons. Not protected, so it changes in combat too.
@@ -2364,7 +2876,9 @@ local function FrameReport()
         tostring(party:GetAttribute("showSolo")), tostring(party:GetAttribute("showRaid")),
         tostring(party:GetAttribute("groupFilter")), tostring(party:GetAttribute("groupBy")),
         tostring(party:GetAttribute("sortMethod"))))
+    local empty = {}
     for i, m in ipairs(members) do
+        if not m.unit and not m:IsShown() then table.insert(empty, i) else
         local ok, role = pcall(UnitGroupRolesAssigned, m.unit or "none")
         Print(("member %d: unit %s, shown %s, %.0fx%.0f, buttons %d, buffs %s, debuffs %s, dispel %s, role %s"):format(i,
             tostring(m:GetAttribute("unit")), tostring(m:IsShown()), m:GetWidth(), m:GetHeight(),
@@ -2373,7 +2887,33 @@ local function FrameReport()
             tostring(m.dispel and m.dispel.auraUnit or m.dispel ~= nil) .. " " .. tostring(m.dispel and m.dispel.dispelFilter),
             ok and secret(role) or "error"))
         Print(("  swipes %s"):format(tostring(m.swipes and m.swipes.auraUnit or m.swipes ~= nil)))
+        -- for the can't-cast marks: the debuffs as the game names them, and the marked buttons
+        local have = m.unit and UnitBuffs(m.unit, "HARMFUL")
+        local seen = {}
+        if have then
+            for id, aura in pairs(have.ids) do table.insert(seen, ("%s %d"):format(tostring(aura.name), id)) end
+        end
+        local marked = {}
+        for _, b in ipairs(buttons[m] or {}) do
+            local kinds = {}
+            if b.blocker then table.insert(kinds, "click") end
+            if b.shiftBlocker then table.insert(kinds, "shift") end
+            if #kinds > 0 then
+                local times = {}
+                for name, t in pairs(b.blockTimes or {}) do
+                    table.insert(times, ("%s %.0fs"):format(name, t.ends - GetTime()))
+                end
+                table.insert(marked, ("%s [%s]%s%s"):format(b.label or "?", table.concat(kinds, "+"),
+                    #times > 0 and " " .. table.concat(times, ", ") or "",
+                    b.blockMark and b.blockMark:IsShown() and " (marked)" or ""))
+            end
+        end
+        Print(("  debuffs: %s; mark buttons: %s"):format(
+            not m.unit and "no member" or have and (#seen > 0 and table.concat(seen, ", ") or "none") or "secret",
+            #marked > 0 and table.concat(marked, ", ") or "none"))
+        end
     end
+    if #empty > 0 then Print(("empty frames (no member): %s"):format(table.concat(empty, ", "))) end
 end
 
 OCC.FrameReport = FrameReport
@@ -2413,6 +2953,9 @@ local HELP = {
     "/occ dispelmine - tint only for debuffs you can dispel, or for all of them",
     "/occ roles - show or hide role icons",
     "/occ swipes - a swipe on a button while your buff from its spell is on the member",
+    "/occ blocked - a red mark on a button while a debuff stops its spell on the member, ex: Weakened Soul",
+    "/occ dispelglow - a dispel spell's button glows in the colour of a debuff it can remove",
+    "/occ rangered - red over a member's buttons while they're out of range",
     "/occ tooltips - tooltips on the buttons",
     "/occ membertooltips - the members' tooltips, bottom right of the screen",
     "/occ target - a frame under the party for a friendly player you target who isn't in it",
@@ -2485,6 +3028,15 @@ SlashCmdList.OPCOWSCLICKCAST = function(msg)
     elseif cmd == "swipes" then
         OCC.SetSwipes(not db.swipes)
         Print("buff swipes on the buttons " .. (db.swipes and "on" or "off") .. ".")
+    elseif cmd == "blocked" then
+        OCC.SetBlocked(not db.blocked)
+        Print("can't-cast marks on the buttons " .. (db.blocked and "on" or "off") .. ".")
+    elseif cmd == "dispelglow" then
+        OCC.SetDispelGlow(not db.dispelGlow)
+        Print("dispel glow on the buttons " .. (db.dispelGlow and "on" or "off") .. ".")
+    elseif cmd == "rangered" then
+        OCC.SetRangeRed(not db.rangeRed)
+        Print("red buttons for members out of range " .. (db.rangeRed and "on" or "off") .. ".")
     elseif cmd == "tooltips" then
         OCC.SetTooltips(not db.tooltips)
         Print("button tooltips " .. (db.tooltips and "on" or "off") .. ".")
@@ -2619,10 +3171,18 @@ frame:SetScript("OnEvent", function(_, event)
             if m.body then UpdateTarget(m) end
         end
         UpdateTargetFrame()
+        -- the target frame's unit is still "target", but it's someone else: their own marks
+        if target then
+            target.blockUnit = nil
+            UpdateBlocks(target)
+        end
     elseif event == "PLAYER_REGEN_ENABLED" then
         fighting = false
         -- the buffs can be read again
-        for _, m in ipairs(members) do UpdateReminders(m) end
+        for _, m in ipairs(members) do
+            UpdateReminders(m)
+            UpdateBlocks(m)
+        end
         if pending then
             OCC.Sync()
             if OCC.RefreshConfig then OCC.RefreshConfig() end
@@ -2648,6 +3208,9 @@ frame:SetScript("OnEvent", function(_, event)
         -- the buffs are secret now: the reminders hide until it ends
         fighting = true
         for _, m in ipairs(members) do UpdateReminders(m) end
+        -- the driver is about to show the target frame for any friendly target: see-through if it's
+        -- in the party
+        UpdateTargetFrame()
         -- the real frames are needed now
         if previewOn then
             OCC.SetPreview(false)

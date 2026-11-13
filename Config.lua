@@ -641,7 +641,7 @@ end
 
 local function CreateConfig()
     local f = CreateFrame("Frame", "OpcowsClickCastConfig", UIParent, "BasicFrameTemplateWithInset")
-    f:SetSize(460, 816)
+    f:SetSize(460, 868)
     f:SetPoint("CENTER")
     f:SetFrameStrata("HIGH")
     f:SetToplevel(true)
@@ -1029,34 +1029,50 @@ local function CreateConfig()
     Tooltip(swipes, "Buff swipes", "A swipe on a spell button while your buff from that spell is on the "
         .. "member, ex: Renew. It darkens as the buff runs out. Not on macro buttons. Changes apply out "
         .. "of combat.")
+    local dispelGlow = Check(f, "Dispel button glow", function(v)
+        OCC.SetDispelGlow(v)
+    end)
+    Grid(dispelGlow, 7, 1)
+    Tooltip(dispelGlow, "Dispel button glow", "A border round a dispel spell's button while the member "
+        .. "has a debuff it can remove, in the debuff's colour: blue magic, purple curse, brown disease, "
+        .. "green poison. Ex: Dispel Magic, Cure Disease, Remove Curse, Cleanse. Works in combat. Changes "
+        .. "apply out of combat.")
+    local blocked = Check(f, "Can't-cast marks", function(v)
+        OCC.SetBlocked(v)
+    end)
+    Grid(blocked, 7, 2)
+    Tooltip(blocked, "Can't-cast marks", "A red mark on a spell button while the member has a debuff that "
+        .. "stops you casting it on them: Weakened Soul for Power Word: Shield, Forbearance for Blessing "
+        .. "of Protection. A swipe shows when it wears off. Macro buttons get it too, by the macro's spell. "
+        .. "Changes apply out of combat.")
 
     local memberTooltips = Check(f, "Member tooltips", function(v)
         OCC.SetMemberTooltips(v)
     end)
-    Grid(memberTooltips, 7, 1)
+    Grid(memberTooltips, 8, 1)
     Tooltip(memberTooltips, "Member tooltips", "Hovering a member shows their tooltip in the bottom right "
         .. "of the screen, like Blizzard's party frames, clear of the bars.")
     local tooltips = Check(f, "Button tooltips", function(v)
         OCC.SetTooltips(v)
     end)
-    Grid(tooltips, 7, 2)
+    Grid(tooltips, 8, 2)
     Tooltip(tooltips, "Button tooltips", "Tooltips on the buttons, by the button. Off, they don't cover the bars.")
 
     local minimap = Check(f, "Minimap button", function(v)
         OCC.DB().minimap.hide = not v
         OCC.UpdateMinimap()
     end)
-    Grid(minimap, 8, 1)
+    Grid(minimap, 9, 1)
     local debug = Check(f, "Print each click in chat (debug)", function(v)
         OCC.DB().debug = v
     end)
-    Grid(debug, 8, 2)
+    Grid(debug, 9, 2)
 
     -- the members' order: left-click for the next one, right-click for the one before
     local SORT_NAMES = { group = "Group", role = "Role", name = "Name" }
     local SORT_ORDER = { "group", "role", "name" }
     local sort = Button(f, "Sort", 220, nil)
-    sort:SetPoint("TOPLEFT", checks, "TOPLEFT", 0, -8 * CHECK_ROW - 4)
+    sort:SetPoint("TOPLEFT", checks, "TOPLEFT", 0, -9 * CHECK_ROW - 4)
     sort:RegisterForClicks("LeftButtonUp", "RightButtonUp")
     sort:SetScript("OnClick", function(_, button)
         local cur = 1
@@ -1073,7 +1089,7 @@ local function CreateConfig()
     local shiftRight = Check(f, "Shift-right: 2 ranks lower", function(v)
         OCC.SetShiftRight(v)
     end)
-    Grid(shiftRight, 9, 2)
+    Grid(shiftRight, 10, 2)
     Tooltip(shiftRight, "Shift-right-click two ranks lower", "On a spell button whose shift-click is "
         .. "auto (a rank lower), shift-right-click casts it two ranks lower. Off, shift-right-click does "
         .. "what shift-click does. Buttons with their own shift-click action don't change.\n\nChanges "
@@ -1082,7 +1098,14 @@ local function CreateConfig()
     local byName = Check(f, "Cast by name and rank", function(v)
         OCC.SetByName(v)
     end)
-    Grid(byName, 10, 1)
+    Grid(byName, 11, 1)
+    local rangeRed = Check(f, "Red when out of range", function(v)
+        OCC.SetRangeRed(v)
+    end)
+    -- under Cast by name: beside it is the Rebuild button
+    Grid(rangeRed, 12, 1)
+    Tooltip(rangeRed, "Red when out of range", "A red overlay on a member's buttons while they're out of "
+        .. "range, as well as the faded bars. Works in combat.")
     Tooltip(byName, "Cast by name and rank", "Spell buttons cast by name and rank, ex: Heal(Rank 2), "
         .. "instead of by spell id. Try it if a button casts the wrong rank or nothing at all.\n\n"
         .. "Changes apply out of combat.")
@@ -1092,7 +1115,7 @@ local function CreateConfig()
         OCC.Print(("%d members showing."):format(OCC.ShownMembers()))
         OCC.RefreshConfig()
     end)
-    rebuild:SetPoint("TOPLEFT", checks, "TOPLEFT", CHECK_COLUMN, -9 * CHECK_ROW - 4)
+    rebuild:SetPoint("TOPLEFT", checks, "TOPLEFT", CHECK_COLUMN, -10 * CHECK_ROW - 4)
     Tooltip(rebuild, "Rebuild", "Sets up the party frame and its buttons again, in case something looks "
         .. "out of date. In combat it waits until combat ends.")
     local report = Button(f, "Frame report", 106, function() OCC.FrameReport() end)
@@ -1217,6 +1240,9 @@ local function CreateConfig()
         dispelMine:SetChecked(db.dispelMine and true or false)
         dispelMine:SetEnabled(db.dispel and true or false)
         swipes:SetChecked(db.swipes and true or false)
+        blocked:SetChecked(db.blocked and true or false)
+        dispelGlow:SetChecked(db.dispelGlow and true or false)
+        rangeRed:SetChecked(db.rangeRed and true or false)
         memberTooltips:SetChecked(db.memberTooltips and true or false)
         targetFrame:SetChecked(db.targetFrame and true or false)
         shiftRight:SetChecked(db.shiftRight and true or false)

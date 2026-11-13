@@ -1,6 +1,6 @@
 ## Interface: 16001
 ## Title: Opcow's Click Cast
-## Version: 0.25.0
+## Version: 0.26.0
 ## Notes: A party frame with spell and macro buttons under each member that cast on that member.
 ## X-Curse-Project-ID: 1801443
 ## IconTexture: Interface\Icons\Spell_Holy_Heal

@@ -10,11 +10,13 @@
 - **Macros as buttons.** Write `@unit` where the target goes, ex: `/cast [@unit] Renew`, and it becomes the member you clicked.
 - **Self only** buttons cast on you and show on your own frame only, ex: racials.
 - **Buff reminders.** Tick **Remind** on a buff's button. Out of combat, members missing that buff get its icon beside their frame, and the button glows. Group buffs count too, ex: Prayer of Fortitude for Power Word: Fortitude.
-- **Cooldowns** show on each button, along with a swipe while your HoT or buff from that spell is on the member.
+- **Cooldowns** show on each button, along with a swipe while your HoT or buff from that spell is on the member. A button turns red while a debuff stops its spell on that member, ex: Weakened Soul for Power Word: Shield.
+- **Dispel glow.** Your dispel button gets a border in the debuff's colour while the member has something it can remove, ex: Dispel Magic glows blue on magic. In combat too.
 
 ## The frame
 
 - Health, power, incoming heals, your buffs, dispellable debuff colours, threat, role icons, range fading and class colours. All of these work in combat.
+- **Out of range** members get red buttons, and a button never casts on you instead.
 - A **target frame** for a friendly player who isn't in your party, with the same buttons. It's outlined in purple so it's never mistaken for a party member.
 - Set the button size, buttons per row, width, bar height, scale, bar texture and sort order (group, role or name).
 - Optionally hide Blizzard's party frames, or show your own frame when you're not in a group.
