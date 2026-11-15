@@ -379,9 +379,11 @@ local function ActionItem(i, a)
             item.spell = main.id
             local right = OCC.DB().right == "up" and high or low
             local other = right ~= main and ("right-click: " .. OCC.RankText(right))
+                or a.noDownrank and OCC.DB().right ~= "up" and "never downranked"
                 or ("no rank " .. (OCC.DB().right == "up" and "higher" or "lower"))
+            if a.noDownrank and right ~= main then other = other .. ", never downranked" end
             item.text = ("%s  |cff808080%s%s%s, %s|r"):format(ActionName(a), a.self and "on you, " or "",
-                a.remind and "remind, " or "", OCC.RankText(main), other)
+                a.remindOnly and "reminder only, " or a.remind and "remind, " or "", OCC.RankText(main), other)
         else
             item.icon = 134400
             item.text = ("%s  |cffff4040not in your spellbook|r"):format(a.spell)
@@ -397,6 +399,8 @@ local function ActionItem(i, a)
             item.tip = { a.macro, body }
         end
     end
+    local classes = OCC.ClassesText(a)
+    if classes then item.text = item.text .. "  |cff808080for " .. classes .. "|r" end
     return item
 end
 
@@ -641,7 +645,7 @@ end
 
 local function CreateConfig()
     local f = CreateFrame("Frame", "OpcowsClickCastConfig", UIParent, "BasicFrameTemplateWithInset")
-    f:SetSize(460, 868)
+    f:SetSize(460, 890)
     f:SetPoint("CENTER")
     f:SetFrameStrata("HIGH")
     f:SetToplevel(true)
@@ -769,30 +773,100 @@ local function CreateConfig()
             .. "to pick from its ranks."
     end)
 
+    -- the classes the selected button shows under, picked in the list beside the window
+    local function ClassRows(i)
+        local a = OCC.DB().actions[i]
+        if not a then return nil end
+        local any = type(a.classes) == "table" and next(a.classes) ~= nil
+        local rows = { {
+            text = "Everyone  |cff808080no filter|r", selected = not any,
+            tip = { "Everyone", "The button shows under every member, whatever their class." },
+            onClick = function() OCC.SetClass(i, nil) end,
+        } }
+        for _, c in ipairs(OCC.CLASSES) do
+            local on = any and a.classes[c] and true or false
+            local color = RAID_CLASS_COLORS and RAID_CLASS_COLORS[c]
+            local hex = color and ("|cff%02x%02x%02x"):format(color.r * 255, color.g * 255, color.b * 255) or "|cffffffff"
+            table.insert(rows, {
+                text = hex .. OCC.ClassName(c) .. "|r" .. (on and "  |cff808080shown|r" or ""),
+                selected = on,
+                tip = { OCC.ClassName(c), "Click to show the button under " .. OCC.ClassName(c)
+                    .. " members, or click again to stop. Tick as many classes as you like." },
+                onClick = function() OCC.SetClass(i, c, not on) end,
+            })
+        end
+        return rows
+    end
+    local classes = Button(f, "Classes: all", 120, function()
+        if not selected then return end
+        if picker:IsShown() and picker.kind == "class" then picker:Hide() return end
+        picker.kind = "class"
+        local i = selected
+        picker:Open("Show under", function() return ClassRows(i) or {} end, true)
+    end)
+    classes:SetPoint("LEFT", rank, "RIGHT", 4, 0)
+    -- kept on the rank button: Refresh is at Lua 5.1's limit of 60 upvalues
+    rank.classes, classes.Rows = classes, ClassRows
+    Tooltip(classes, "Classes", "Show the selected button only under members of the classes you pick, ex: "
+        .. "Arcane Intellect under mana users, or a Blessing under warriors. With none picked it shows under "
+        .. "everyone.\n\nThe frames keep the same width: a button another class doesn't get leaves its room. "
+        .. "The target frame shows every button.\n\nChanges apply out of combat. If someone joins in combat, "
+        .. "their buttons follow their class when combat ends.")
+
     -- the selected button casts on you and shows only on your own frame
     local selfOnly = Check(f, "Self only", function(v)
         if selected then OCC.SetSelfOnly(selected, v) end
     end)
-    selfOnly:SetPoint("LEFT", rank, "RIGHT", 6, 0)
+    -- the button's checkboxes in one row under Up, Down and Rank, each after the one before's label
+    selfOnly:SetPoint("TOPLEFT", up, "BOTTOMLEFT", -2, -2)
+    local function After(c, prev)
+        c:SetPoint("LEFT", prev.label, "RIGHT", 10, -1)
+    end
+    -- its label only, so the box after it gets its own clicks
+    local function LabelHit(c)
+        c:SetHitRectInsets(0, -math.ceil(c.label:GetStringWidth() or 40), 0, 0)
+    end
     Tooltip(selfOnly, "Self only", "The selected button shows only on your own frame and casts on you: for "
         .. "racials and other spells you can only cast on yourself. Its click, right-click and shift-click "
         .. "all do, and @unit in its macros is you. It isn't on the target frame.\n\nChanges apply out of "
         .. "combat. If your place in the party changes in combat, the button moves to your frame when combat "
         .. "ends, and casts on you until then.")
-    -- its label only, so the box beside it gets its own clicks
-    selfOnly:SetHitRectInsets(0, -50, 0, 0)
+    LabelHit(selfOnly)
 
     -- the selected spell's buff shows beside members missing it, and its button glows on them
     local remind = Check(f, "Remind", function(v)
         if selected then OCC.SetRemind(selected, v) end
     end)
-    remind:SetPoint("LEFT", selfOnly, "RIGHT", 52, 0)
-    remind:SetHitRectInsets(0, -40, 0, 0)
+    After(remind, selfOnly)
+    LabelHit(remind)
     Tooltip(remind, "Remind when missing", "When a party member doesn't have the selected spell's buff, its "
         .. "icon shows beside their frame and this button glows on their frame: click it to buff them. "
         .. "Anyone's buff counts, at any rank, and the group version too (Prayer of Fortitude for Power Word: "
         .. "Fortitude).\n\nFor spells only. Buffs can't be read in combat, so the reminders hide for a fight and "
         .. "come back after it.")
+
+    -- the selected spell isn't in the row: it shows beside members missing its buff, to click
+    local remindOnly = Check(f, "Reminder only", function(v)
+        if selected then OCC.SetRemindOnly(selected, v) end
+    end)
+    After(remindOnly, remind)
+    LabelHit(remindOnly)
+    Tooltip(remindOnly, "Reminder only", "The selected spell's button isn't in the row under the bars. It "
+        .. "shows beside a party member's frame only while they're missing its buff: click it there to buff "
+        .. "them. For buffs you cast now and then, so they don't take room in the row.\n\nFor spells only. "
+        .. "Out of combat only: buffs can't be read in a fight, so these buttons hide when it starts and "
+        .. "come back after it.")
+
+    -- the selected spell never casts a lower rank
+    local noDownrank = Check(f, "Never downrank", function(v)
+        if selected then OCC.SetNoDownrank(selected, v) end
+    end)
+    After(noDownrank, remindOnly)
+    LabelHit(noDownrank)
+    Tooltip(noDownrank, "Never downrank", "The selected spell always casts the rank set for its click. "
+        .. "Right-click casts that rank too when it would go a rank lower, and so does shift-click when it's "
+        .. "Auto, and shift-right-click. A rank higher on right-click, or a shift-click spell you picked, still "
+        .. "works.\n\nFor spells only.")
 
     -- the rank list beside the window, for the selected spell: one row a rank, with its tooltip
     local function RankRows(a)
@@ -806,7 +880,8 @@ local function CreateConfig()
             if v == "auto" then
                 local _, low = OCC.ResolveSpell(a)
                 r = low
-                text = "Auto  |cff808080a rank below the button's"
+                text = "Auto  |cff808080" .. (a.noDownrank and "the button's own rank (never downrank)"
+                    or "a rank below the button's")
                     .. (low and low.rank and (", rank " .. low.rank) or "") .. "|r"
             elseif v == false then
                 r = top
@@ -831,7 +906,10 @@ local function CreateConfig()
     -- clicking a spell in the list opens its ranks, clicking it again closes them. An open spell or
     -- macro list stays: it's for the selected button.
     OnSelect = function(i, again)
-        if picker:IsShown() and (picker.kind == "spell" or picker.kind == "macro") then return end
+        -- an open class list follows the selected button, see Refresh
+        if picker:IsShown() and (picker.kind == "spell" or picker.kind == "macro" or picker.kind == "class") then
+            return
+        end
         if again and picker:IsShown() and picker.kind == "rank" then
             picker:Hide()
             return
@@ -848,7 +926,8 @@ local function CreateConfig()
 
     -- options
     local optTitle = Label(f, "Options")
-    optTitle:SetPoint("TOPLEFT", up, "BOTTOMLEFT", 2, -14)
+    -- below the Reminder only box under Self only
+    optTitle:SetPoint("TOPLEFT", up, "BOTTOMLEFT", 2, -36)
 
     local lock = Button(f, "Unlock frame", 130, function()
         OCC.SetUnlocked(not OCC.DB().unlocked)
@@ -1029,14 +1108,34 @@ local function CreateConfig()
     Tooltip(swipes, "Buff swipes", "A swipe on a spell button while your buff from that spell is on the "
         .. "member, ex: Renew. It darkens as the buff runs out. Not on macro buttons. Changes apply out "
         .. "of combat.")
-    local dispelGlow = Check(f, "Dispel button glow", function(v)
+    local dispelGlow = Check(f, "Dispel glow", function(v)
         OCC.SetDispelGlow(v)
     end)
     Grid(dispelGlow, 7, 1)
-    Tooltip(dispelGlow, "Dispel button glow", "A border round a dispel spell's button while the member "
+    -- its label only, so the style button beside it gets its own clicks
+    dispelGlow:SetHitRectInsets(0, -70, 0, 0)
+    Tooltip(dispelGlow, "Dispel button glow", "A dispel spell's button lights up while the member "
         .. "has a debuff it can remove, in the debuff's colour: blue magic, purple curse, brown disease, "
-        .. "green poison. Ex: Dispel Magic, Cure Disease, Remove Curse, Cleanse. Works in combat. Changes "
-        .. "apply out of combat.")
+        .. "green poison. Ex: Dispel Magic, Cure Disease, Remove Curse, Cleanse. Works in combat. Pick its "
+        .. "look with the button beside it. Changes apply out of combat.")
+    -- the glow's look: left-click for the next one, right-click for the one before
+    local dispelStyle = Button(f, "Border", 100, nil)
+    dispelStyle:SetPoint("LEFT", dispelGlow, "LEFT", 104, 0)
+    dispelStyle:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    dispelStyle:SetScript("OnClick", function(_, button)
+        local styles, cur = OCC.DISPEL_STYLES, 1
+        for i, s in ipairs(styles) do
+            if s == OCC.DispelStyle() then cur = i end
+        end
+        cur = button == "RightButton" and (cur - 2) % #styles + 1 or cur % #styles + 1
+        OCC.SetDispelStyle(styles[cur])
+    end)
+    Tooltip(dispelStyle, "Dispel glow look", "|cffffffffBorder|r: a thin border round the button.\n"
+        .. "|cffffffffThick border|r: a wider one.\n|cffffffffGlow|r: the action bar's glowing edge, past the "
+        .. "button's sides.\n|cffffffffTint|r: the colour over the whole icon.\n|cffffffffCorner|r: a square "
+        .. "in the top right corner.\n|cffffffffSpell alert|r: the look of a proc's glow, marching "
+        .. "round the button, pulsing.\n\nLeft-click for the next one, right-click for the one before. Try "
+        .. "them with Preview. Changes apply out of combat.")
     local blocked = Check(f, "Can't-cast marks", function(v)
         OCC.SetBlocked(v)
     end)
@@ -1104,6 +1203,25 @@ local function CreateConfig()
     end)
     -- under Cast by name: beside it is the Rebuild button
     Grid(rangeRed, 12, 1)
+    -- the reminder glow's look, beside Red when out of range: left-click for the next, right for the one
+    -- before. Kept on dispelStyle: Refresh is at Lua 5.1's limit of 60 upvalues.
+    local remindGlow = Button(f, "Reminder glow", 212, nil)
+    remindGlow:SetPoint("TOPLEFT", checks, "TOPLEFT", CHECK_COLUMN, -11 * CHECK_ROW - 2)
+    remindGlow:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    remindGlow:SetScript("OnClick", function(_, button)
+        local list, cur = OCC.REMIND_GLOWS, 1
+        for i, s in ipairs(list) do
+            if s == OCC.DB().remindGlow then cur = i end
+        end
+        cur = button == "RightButton" and (cur - 2) % #list + 1 or cur % #list + 1
+        OCC.SetRemindGlowStyle(list[cur])
+    end)
+    Tooltip(remindGlow, "Reminder glow", "The glow on a button, and on its icon beside the frame, while a "
+        .. "member is missing its buff, as Buff Reminder has them.\n|cffffffffPulse|r: fades in and out.\n"
+        .. "|cffffffffFlash|r: fades fast.\n|cffffffffSteady|r: stays lit.\n|cffffffffSpell alert|r: the "
+        .. "game's proc glow, or Pulse where the game doesn't have it.\n|cffffffffNone|r: no glow.\n\n"
+        .. "Left-click for the next one, right-click for the one before. Try them with Preview.")
+    dispelStyle.remindGlow = remindGlow
     Tooltip(rangeRed, "Red when out of range", "A red overlay on a member's buttons while they're out of "
         .. "range, as well as the faded bars. Works in combat.")
     Tooltip(byName, "Cast by name and rank", "Spell buttons cast by name and rank, ex: Heal(Rank 2), "
@@ -1179,6 +1297,23 @@ local function CreateConfig()
         list:SetItems(items)
 
         local a = selected and actions[selected]
+        rank.classes:SetEnabled(a and true or false)
+        local filter = a and OCC.ClassesText(a)
+        if filter and #filter > 12 then
+            local n = 0
+            for _ in pairs(a.classes) do n = n + 1 end
+            filter = n .. " classes"
+        end
+        rank.classes:SetText("Classes: " .. (filter or "all"))
+        if picker:IsShown() and picker.kind == "class" then
+            local rows = selected and rank.classes.Rows(selected)
+            if rows then
+                picker.rows = rows
+                picker:Update()
+            else
+                picker:Hide()
+            end
+        end
         up:SetEnabled(selected ~= nil and selected > 1)
         down:SetEnabled(selected ~= nil and selected < #actions)
         selfOnly:SetEnabled(a and true or false)
@@ -1191,10 +1326,18 @@ local function CreateConfig()
         local canRemind = a and a.spell and true or false
         remind:SetEnabled(canRemind)
         remind:SetChecked(canRemind and a.remind and true or false)
+        remindOnly:SetEnabled(canRemind)
+        remindOnly:SetChecked(canRemind and a.remindOnly and true or false)
+        noDownrank:SetEnabled(canRemind)
+        noDownrank:SetChecked(canRemind and a.noDownrank and true or false)
         if canRemind then
             remind.label:SetTextColor(1, 1, 1)
+            remindOnly.label:SetTextColor(1, 1, 1)
+            noDownrank.label:SetTextColor(1, 1, 1)
         else
             remind.label:SetTextColor(0.5, 0.5, 0.5)
+            remindOnly.label:SetTextColor(0.5, 0.5, 0.5)
+            noDownrank.label:SetTextColor(0.5, 0.5, 0.5)
         end
         -- the rank button: the spell it sets the rank of, the rank that casts now, and the rank set
         local spell, r, set, auto
@@ -1242,6 +1385,9 @@ local function CreateConfig()
         swipes:SetChecked(db.swipes and true or false)
         blocked:SetChecked(db.blocked and true or false)
         dispelGlow:SetChecked(db.dispelGlow and true or false)
+        dispelStyle:SetText(OCC.DISPEL_STYLE_NAMES[OCC.DispelStyle()])
+        dispelStyle:SetEnabled(db.dispelGlow and true or false)
+        dispelStyle.remindGlow:SetText("Reminder glow: " .. (OCC.REMIND_GLOW_NAMES[db.remindGlow] or "Pulse"))
         rangeRed:SetChecked(db.rangeRed and true or false)
         memberTooltips:SetChecked(db.memberTooltips and true or false)
         targetFrame:SetChecked(db.targetFrame and true or false)

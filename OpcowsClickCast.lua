@@ -104,6 +104,8 @@ local function DB()
     if db.blocked == nil then db.blocked = true end
     -- a dispel spell's button glows while the member has a debuff it removes
     if db.dispelGlow == nil then db.dispelGlow = true end
+    if not db.dispelStyle then db.dispelStyle = "border" end
+    if not OCC.REMIND_GLOW_NAMES[db.remindGlow or ""] then db.remindGlow = "pulse" end
     if db.rangeRed == nil then db.rangeRed = true end
     -- tooltips on the buttons, off: they cover the bars
     db.tooltips = db.tooltips and true or false
@@ -196,7 +198,8 @@ end
 -- the spell to cast for an action, the one a rank below it, the one a rank above it and the one two
 -- ranks below it, each { id, rank }, or nil when the spell isn't in your spellbook. With no rank set
 -- it's your highest rank. A rank you don't know gives the highest one under it. With no rank below
--- or above, that one is the lowest or highest there is.
+-- or above, that one is the lowest or highest there is. A spell set to never downrank (a.noDownrank)
+-- gives its own rank for the ones below, so right-click and auto shift-click cast that rank too.
 local function ResolveSpell(a)
     local ranks = Book()[a.spell:lower()]
     if not ranks or #ranks == 0 then return nil end
@@ -207,6 +210,9 @@ local function ResolveSpell(a)
             if r.rank and r.rank <= a.rank then pick = i end
         end
         pick = pick or 1
+    end
+    if a.noDownrank then
+        return ranks[pick], ranks[pick], ranks[math.min(pick + 1, #ranks)], ranks[pick]
     end
     return ranks[pick], ranks[math.max(pick - 1, 1)], ranks[math.min(pick + 1, #ranks)],
         ranks[math.max(pick - 2, 1)]
@@ -509,8 +515,17 @@ local function UpdateTarget(m)
     m.targetBorder:SetShown(t and true or false)
 end
 
+-- each button's red square shown only while the button itself is. OnShow/OnHide alone miss a button
+-- hidden while its frame was already out of sight, ex: a reminder only button leaving the row.
+local function SyncFar(m)
+    for _, b in ipairs(buttons[m] or {}) do
+        if b.farTex then b.farTex:SetShown(b:IsShown()) end
+    end
+end
+
 -- a member out of range has faded bars
 local function UpdateRange(m)
+    SyncFar(m)
     local u = m.unit
     if not u or u == "player" then
         m.body:SetAlpha(1)
@@ -918,23 +933,132 @@ local function SetBlock(m, i, b)
     ShowBlockSlots(b)
 end
 
--- the dispel glow: a border round a button, coloured by the game in the dispel type of the debuff
-local DISPEL_EDGE = 2
-local function DispelBorder(button)
-    local edges = {
-        { "TOPLEFT", "TOPRIGHT", nil, DISPEL_EDGE },
-        { "BOTTOMLEFT", "BOTTOMRIGHT", nil, DISPEL_EDGE },
-        { "TOPLEFT", "BOTTOMLEFT", DISPEL_EDGE, nil },
-        { "TOPRIGHT", "BOTTOMRIGHT", DISPEL_EDGE, nil },
-    }
+-- the dispel highlight's looks, in the options' order, see DispelBorder
+local DISPEL_STYLES = { "border", "thick", "glow", "tint", "corner", "alert" }
+local DISPEL_STYLE_NAMES = { border = "Border", thick = "Thick border", glow = "Glow", tint = "Tint",
+    corner = "Corner", alert = "Spell alert" }
+
+local function DispelStyle()
+    local s = DB().dispelStyle
+    return DISPEL_STYLE_NAMES[s] and s or "border"
+end
+
+-- a border of edge pixels round button's inside
+local function DispelEdges(button, edge)
     local out = {}
-    for _, e in ipairs(edges) do
+    for _, e in ipairs({
+        { "TOPLEFT", "TOPRIGHT", nil, edge },
+        { "BOTTOMLEFT", "BOTTOMRIGHT", nil, edge },
+        { "TOPLEFT", "BOTTOMLEFT", edge, nil },
+        { "TOPRIGHT", "BOTTOMRIGHT", edge, nil },
+    }) do
         local t = button:CreateTexture(nil, "OVERLAY")
         t:SetPoint(e[1])
         t:SetPoint(e[2])
         if e[3] then t:SetWidth(e[3]) end
         if e[4] then t:SetHeight(e[4]) end
         t:SetTexture("Interface\\Buttons\\WHITE8X8")
+        table.insert(out, t)
+    end
+    return out
+end
+
+-- the textures of each dispel style on button
+local DISPEL_MAKERS = {
+    border = function(button) return DispelEdges(button, 2) end,
+    thick = function(button) return DispelEdges(button, 4) end,
+    -- the action bar's glowing border, past the button's edges by a share of its size
+    glow = function(button)
+        local t = button:CreateTexture(nil, "OVERLAY")
+        t:SetTexture("Interface\\Buttons\\UI-ActionButton-Border")
+        t:SetBlendMode("ADD")
+        local function Fit()
+            local w = button:GetWidth() or 0
+            local out = math.floor(w * 0.36 + 0.5)
+            t:ClearAllPoints()
+            t:SetPoint("TOPLEFT", -out, out)
+            t:SetPoint("BOTTOMRIGHT", out, -out)
+        end
+        Fit()
+        pcall(button.HookScript, button, "OnSizeChanged", Fit)
+        return { t }
+    end,
+    -- the colour added over the whole icon, so it still shows through
+    tint = function(button)
+        local t = button:CreateTexture(nil, "OVERLAY")
+        t:SetAllPoints()
+        t:SetTexture("Interface\\Buttons\\WHITE8X8")
+        t:SetBlendMode("ADD")
+        return { t }
+    end,
+    -- a square in the top right corner, a third of the button
+    corner = function(button)
+        local t = button:CreateTexture(nil, "OVERLAY")
+        t:SetPoint("TOPRIGHT")
+        t:SetTexture("Interface\\Buttons\\WHITE8X8")
+        local function Fit()
+            local w = math.max(4, math.floor((button:GetWidth() or 0) / 3 + 0.5))
+            t:SetSize(w, w)
+        end
+        Fit()
+        pcall(button.HookScript, button, "OnSizeChanged", Fit)
+        return { t }
+    end,
+    -- the look of the game's spell alert (a proc's glow): a soft glow and marching ants past the
+    -- button's edges, the glow pulsing. Made grey so the dispel colour shows true. Only looks: what
+    -- shows it is the aura slot, so it works in combat.
+    alert = function(button)
+        local glow = button:CreateTexture(nil, "OVERLAY")
+        glow:SetTexture("Interface\\SpellActivationOverlay\\IconAlert")
+        glow:SetTexCoord(0.0078125, 0.5078125, 0.27734375, 0.52734375)
+        local ants = button:CreateTexture(nil, "OVERLAY")
+        ants:SetTexture("Interface\\SpellActivationOverlay\\IconAlertAnts")
+        ants:SetTexCoord(0, 48 / 256, 0, 48 / 256)
+        for _, t in ipairs({ glow, ants }) do
+            t:SetBlendMode("ADD")
+            pcall(t.SetDesaturated, t, true)
+        end
+        local function Fit()
+            local w = button:GetWidth() or 0
+            local out = math.floor(w * 0.2 + 0.5)
+            for _, t in ipairs({ glow, ants }) do
+                t:ClearAllPoints()
+                t:SetPoint("TOPLEFT", -out, out)
+                t:SetPoint("BOTTOMRIGHT", out, -out)
+            end
+        end
+        Fit()
+        pcall(button.HookScript, button, "OnSizeChanged", Fit)
+        pcall(function()
+            local pulse = glow:CreateAnimationGroup()
+            pulse:SetLooping("BOUNCE")
+            local a = pulse:CreateAnimation("Alpha")
+            a:SetFromAlpha(1)
+            a:SetToAlpha(0.4)
+            a:SetDuration(0.5)
+            pulse:Play()
+        end)
+        -- the ants' 22 frames, 48 pixels square, 5 to a row of the 256 sheet. A child frame's
+        -- OnUpdate, so it only runs while the slot shows.
+        local tick = CreateFrame("Frame", nil, button)
+        local elapsed, frame = 0, 0
+        tick:SetScript("OnUpdate", function(_, e)
+            elapsed = elapsed + e
+            if elapsed < 0.01 then return end
+            frame = (frame + math.floor(elapsed / 0.01)) % 22
+            elapsed = elapsed % 0.01
+            local l, t = (frame % 5) * 48 / 256, math.floor(frame / 5) * 48 / 256
+            ants:SetTexCoord(l, l + 48 / 256, t, t + 48 / 256)
+        end)
+        return { glow, ants }
+    end,
+}
+
+-- the dispel highlight on a button in style (the option's when nil), coloured by the game in the
+-- dispel type of the debuff
+local function DispelBorder(button, style)
+    local out = DISPEL_MAKERS[style or DispelStyle()](button)
+    for _, t in ipairs(out) do
         if button.AddDispelTypeTexture then
             local ok, err = pcall(function()
                 button:AddDispelTypeTexture(t, { style = Enum.CustomAuraButtonDispelTypeTextureStyle.PreserveAsset,
@@ -942,20 +1066,28 @@ local function DispelBorder(button)
             end)
             if not ok then AuraError(err) end
         end
-        table.insert(out, t)
     end
     return out
 end
 
 -- one of SetDispel's glows over button b, the i-th of member m's: like SetBlockSlot, with the debuff
--- types b's spell dispels
+-- types b's spell dispels. Each style has its own slot, since a slot's looks are made once: a change
+-- of style empties the old one.
 local function SetDispelSlot(m, i, b, prefix, fields)
     local c = m.swipes
     if not c then return end
     local ok, err = pcall(function()
-        local key = prefix .. i
+        local style = DispelStyle()
+        local key = prefix .. (style == "border" and "" or style) .. i
+        local old = b[fields.key]
+        if old and old ~= key then
+            c:SetAuraSlotCandidateFilters(old, { includeSpellIDs = NO_SPELLS })
+            -- the new slot's filter is nothing, so the types below get set
+            b[fields.shown] = nil
+        end
+        b[fields.key] = key
         -- RAID: only debuffs you can dispel. Over the can't-cast mark.
-        local slot = ButtonSlot(m, key, "HARMFUL|RAID", DispelBorder, 14)
+        local slot = ButtonSlot(m, key, "HARMFUL|RAID", function(button) DispelBorder(button, style) end, 14)
         b[fields.slot] = slot
         slot:ClearAllPoints()
         slot:SetAllPoints(b)
@@ -973,8 +1105,10 @@ end
 -- dispel, in the debuff type's colour, ex: Dispel Magic glows blue on magic. In combat too. One for
 -- the click's spell and one for the shift-click's, like SetBlock. Out of combat.
 local function SetDispel(m, i, b)
-    SetDispelSlot(m, i, b, "d", { types = "dispelTypes", slot = "dispelSlot", shown = "dispelShown" })
-    SetDispelSlot(m, i, b, "e", { types = "shiftDispelTypes", slot = "shiftDispelSlot", shown = "shiftDispelShown" })
+    SetDispelSlot(m, i, b, "d", { types = "dispelTypes", slot = "dispelSlot", shown = "dispelShown",
+        key = "dispelKey" })
+    SetDispelSlot(m, i, b, "e", { types = "shiftDispelTypes", slot = "shiftDispelSlot", shown = "shiftDispelShown",
+        key = "shiftDispelKey" })
     ShowBlockSlots(b)
 end
 
@@ -1035,8 +1169,68 @@ end
 -- any rank, and the group version (Prayer of Fortitude for Power Word: Fortitude). Party auras are
 -- secret in combat, so the reminders hide for a fight and come back after it.
 
--- orange, unlike the gold target border
-local REMIND_COLOR = { 1, 0.5, 0 }
+-- the reminder glow's looks, as Buff Reminder has them (db.remindGlow). On OCC rather than locals:
+-- the file is at Lua 5.1's limit of 200 locals.
+OCC.REMIND_GLOWS = { "pulse", "flash", "steady", "alert", "none" }
+OCC.REMIND_GLOW_NAMES = { pulse = "Pulse", flash = "Flash", steady = "Steady", alert = "Spell alert", none = "None" }
+
+-- the game's spell alert, the glow on an action button when a spell procs. Made for action buttons,
+-- so it's only tried: false when this client doesn't have it or it failed.
+function OCC.SpellAlert(f, show)
+    local mgr = ActionButtonSpellAlertManager
+    if mgr and mgr.ShowAlert and mgr.HideAlert then
+        return (pcall(show and mgr.ShowAlert or mgr.HideAlert, mgr, f))
+    end
+    local fn = show and ActionButton_ShowOverlayGlow or ActionButton_HideOverlayGlow
+    if fn then return (pcall(fn, f)) end
+    return false
+end
+
+-- lights frame f up with a reminder glow of kind (pulse, flash, steady, alert), or puts it out (nil
+-- or "none"). The action button border past f's edges, over its swipes and under its rank number.
+function OCC.SetRemindGlow(f, kind)
+    if kind == "none" then kind = nil end
+    local g = f.remindGlow
+    if g then
+        local w = f:GetWidth() or 0
+        g.tex:SetSize(w * 64 / 36, w * 64 / 36)
+    end
+    if f.remindKind == kind then return end
+    if f.remindKind == "alert" then OCC.SpellAlert(f, false) end
+    f.remindKind = kind
+    if g then
+        if g.pulse then g.pulse:Stop() end
+        g:Hide()
+    end
+    if not kind or kind == "alert" and OCC.SpellAlert(f, true) then return end
+    if not g then
+        g = CreateFrame("Frame", nil, f)
+        g:SetAllPoints()
+        g:SetFrameLevel(f:GetFrameLevel() + 3)
+        g.tex = g:CreateTexture(nil, "OVERLAY")
+        g.tex:SetTexture("Interface\\Buttons\\UI-ActionButton-Border")
+        g.tex:SetBlendMode("ADD")
+        g.tex:SetPoint("CENTER")
+        local pulse = g.tex.CreateAnimationGroup and g.tex:CreateAnimationGroup()
+        if pulse then
+            g.fade = pulse:CreateAnimation("Alpha")
+            g.fade:SetFromAlpha(1)
+            g.fade:SetToAlpha(0.3)
+            pulse:SetLooping("BOUNCE")
+            g.pulse = pulse
+        end
+        f.remindGlow = g
+        local w = f:GetWidth() or 0
+        g.tex:SetSize(w * 64 / 36, w * 64 / 36)
+    end
+    g:Show()
+    -- pulse, flash, steady, or a spell alert this client can't show
+    if g.pulse and kind ~= "steady" then
+        g.fade:SetDuration(kind == "flash" and 0.2 or 0.6)
+        g.pulse:Play()
+    end
+end
+
 -- between PLAYER_REGEN_DISABLED and _ENABLED: the first fires before InCombatLockdown is true
 local fighting = false
 local REMIND_GAP = 4
@@ -1078,23 +1272,9 @@ local function UnitBuffs(u, filter)
     return have
 end
 
--- the orange border on button b while its buff is missing on the member
+-- the reminder glow on button b while its buff is missing on the member, see SetRemindGlow
 local function Glow(b, on)
-    if not on then
-        if b.remindGlow then b.remindGlow:Hide() end
-        return
-    end
-    if not b.remindGlow then
-        local g = CreateFrame("Frame", nil, b, "BackdropTemplate")
-        g:SetPoint("TOPLEFT", -1, 1)
-        g:SetPoint("BOTTOMRIGHT", 1, -1)
-        g:SetBackdrop({ edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 2 })
-        g:SetBackdropBorderColor(REMIND_COLOR[1], REMIND_COLOR[2], REMIND_COLOR[3])
-        -- over the swipes, under the rank number, see NewButton
-        g:SetFrameLevel(b:GetFrameLevel() + 3)
-        b.remindGlow = g
-    end
-    b.remindGlow:Show()
+    OCC.SetRemindGlow(b, on and DB().remindGlow or nil)
 end
 
 -- the i-th reminder icon beside member frame m
@@ -1103,10 +1283,6 @@ local function RemindIcon(m, i)
     local f = m.remindIcons[i]
     if f then return f end
     f = CreateFrame("Frame", nil, m.body)
-    f.border = f:CreateTexture(nil, "BACKGROUND")
-    f.border:SetPoint("TOPLEFT", -1, 1)
-    f.border:SetPoint("BOTTOMRIGHT", 1, -1)
-    f.border:SetColorTexture(REMIND_COLOR[1], REMIND_COLOR[2], REMIND_COLOR[3])
     f.icon = f:CreateTexture(nil, "ARTWORK")
     f.icon:SetAllPoints()
     f.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
@@ -1123,24 +1299,48 @@ local function RemindIcon(m, i)
     return f
 end
 
--- shows the icons of the n buttons in missing beside member frame m, in a row from its top right,
--- and glows those buttons. Every other glow and icon on m goes.
+-- shows the buttons in missing beside member frame m, in a row from its top right, and glows them.
+-- A button in the row gets its icon there; a reminder only button goes there itself, so it can be
+-- clicked. Every other glow, icon and reminder only button on m goes. Secure buttons only show and
+-- hide out of combat: the reminders end on PLAYER_REGEN_DISABLED, before the lockdown starts.
 local function ShowReminders(m, missing, who)
     local list = buttons[m] or {}
     local glow = {}
     for _, b in ipairs(missing) do glow[b] = true end
     for _, b in ipairs(list) do Glow(b, glow[b]) end
     local size = DB().size > 0 and DB().size or SIZE
+    local locked = InCombatLockdown()
+    local icons = 0
     for i, b in ipairs(missing) do
-        local f = RemindIcon(m, i)
-        f:SetSize(size, size)
-        f:ClearAllPoints()
-        f:SetPoint("TOPLEFT", m, "TOPRIGHT", REMIND_GAP + (i - 1) * (size + REMIND_GAP), -PAD)
-        f.icon:SetTexture(b.mainIcon)
-        f.spell, f.who = b.label, who
-        f:Show()
+        local x = REMIND_GAP + (i - 1) * (size + REMIND_GAP)
+        if b.remindOnly then
+            if not locked then
+                b:ClearAllPoints()
+                b:SetPoint("TOPLEFT", m, "TOPRIGHT", x, -PAD)
+                b:Show()
+            end
+        else
+            icons = icons + 1
+            local f = RemindIcon(m, icons)
+            f:SetSize(size, size)
+            f:ClearAllPoints()
+            f:SetPoint("TOPLEFT", m, "TOPRIGHT", x, -PAD)
+            f.icon:SetTexture(b.mainIcon)
+            f.spell, f.who = b.label, who
+            f:Show()
+            OCC.SetRemindGlow(f, DB().remindGlow)
+        end
     end
-    for i = #missing + 1, #(m.remindIcons or {}) do m.remindIcons[i]:Hide() end
+    for i = icons + 1, #(m.remindIcons or {}) do
+        OCC.SetRemindGlow(m.remindIcons[i], nil)
+        m.remindIcons[i]:Hide()
+    end
+    if not locked then
+        for _, b in ipairs(list) do
+            if b.remindOnly and not glow[b] then b:Hide() end
+        end
+    end
+    SyncFar(m)
 end
 
 -- member m's reminders for its marked buttons. Hidden in combat, on the target frame, and while the
@@ -1154,7 +1354,8 @@ local function UpdateReminders(m)
         and Known(UnitExists(u)) and Known(UnitIsConnected(u)) and Known(UnitIsVisible(u))
         and Known(UnitIsDeadOrGhost(u)) == false then
         for _, b in ipairs(buttons[m] or {}) do
-            if b.remind and b:IsShown() then
+            -- a reminder only button is hidden while its buff is there
+            if b.remind and (b.remindOnly or b:IsShown()) then
                 have = have or UnitBuffs(u)
                 if not have then
                     missing = {}
@@ -1172,6 +1373,76 @@ local function UpdateReminders(m)
         end
     end
     ShowReminders(m, missing, u and Known(UnitName(u)))
+end
+
+-- /occ reminders: for each member, why their reminders show or not, for finding problems
+local function ReminderReport()
+    local any = false
+    for _, m in ipairs(members) do
+        local u = m.body and m.unit
+        if u then
+            any = true
+            local who = tostring(Known(UnitName(u)) or u)
+            local why
+            if fighting or InCombatLockdown() then
+                why = "in combat"
+            elseif not m:IsShown() then
+                why = "frame hidden"
+            elseif not Known(UnitExists(u)) then
+                why = "no unit"
+            elseif not Known(UnitIsConnected(u)) then
+                why = "offline"
+            elseif not Known(UnitIsVisible(u)) then
+                why = "out of sight"
+            elseif Known(UnitIsDeadOrGhost(u)) ~= false then
+                why = "dead, or not known"
+            end
+            if why then
+                Print(who .. ": skipped, " .. why .. ".")
+            else
+                -- the buffs one by one, to find one the game keeps secret
+                local secret
+                for i = 1, 255 do
+                    local ok, aura = pcall(C_UnitAuras.GetAuraDataByIndex, u, i, "HELPFUL")
+                    if not ok then secret = "buff " .. i .. " errors"; break end
+                    if issecretvalue(aura) then secret = "buff " .. i .. " is secret"; break end
+                    if not aura then break end
+                    if issecretvalue(aura.name) or issecretvalue(aura.spellId) then
+                        secret = "buff " .. i .. "'s name or id is secret"
+                        break
+                    end
+                end
+                local have = UnitBuffs(u)
+                local parts = {}
+                for _, b in ipairs(buttons[m] or {}) do
+                    if b.remind then
+                        local found
+                        if have then
+                            for id in pairs(b.spellIDs or {}) do
+                                if have.ids[id] then found = have.ids[id] end
+                            end
+                            for name in pairs(b.remindNames or {}) do
+                                if have.names[name] then found = have.names[name] end
+                            end
+                        end
+                        local state = not have and "can't tell"
+                            or found and ("has " .. tostring(found.name) .. " (" .. tostring(found.spellId) .. ")")
+                            or "missing"
+                        if b.remindOnly then
+                            state = state .. ", reminder only, " .. (b:IsShown() and "shown" or "hidden")
+                        elseif not b:IsShown() then
+                            state = state .. ", button hidden"
+                        end
+                        parts[#parts + 1] = tostring(b.label) .. ": " .. state
+                    end
+                end
+                if #parts == 0 then parts[1] = "no remind buttons" end
+                Print(who .. ": " .. (secret and ("buffs unreadable, " .. secret .. ". ") or "")
+                    .. table.concat(parts, "; ") .. ".")
+            end
+        end
+    end
+    if not any then Print("no party members to check.") end
 end
 
 -- can't-cast marks, read by this addon --------------------------------------------------------------
@@ -1326,6 +1597,30 @@ local UNIT_EVENTS = { "UNIT_HEALTH", "UNIT_MAXHEALTH", "UNIT_CONNECTION", "UNIT_
 
 -- the header gave member frame m a unit, or took it away: show that unit
 -- whether member m's frame is you: only yours gets the self only buttons
+-- the classes a button can be filtered to (a.classes = { MAGE = true, ... }, nil for everyone).
+-- On OCC rather than locals: the file is at Lua 5.1's limit of 200 locals.
+OCC.CLASSES = { "WARRIOR", "PALADIN", "HUNTER", "ROGUE", "PRIEST", "SHAMAN", "MAGE", "WARLOCK", "DRUID" }
+
+function OCC.ClassName(class)
+    local names = LOCALIZED_CLASS_NAMES_MALE
+    return names and names[class] or class:sub(1, 1) .. class:sub(2):lower()
+end
+
+-- whether action a shows on a member of class: true when it has no filter, or the class can't be read
+function OCC.ForClass(a, class)
+    if not class or type(a.classes) ~= "table" or not next(a.classes) then return true end
+    return a.classes[class] and true or false
+end
+
+-- the class of member frame m's unit, nil for the target frame or when it can't be read
+function OCC.MemberClass(m)
+    if m.isTarget then return nil end
+    local u = m:GetAttribute("unit")
+    if type(u) ~= "string" then return nil end
+    local ok, _, class = pcall(UnitClass, u)
+    return ok and Known(class) or nil
+end
+
 local function IsMe(m)
     local u = not m.isTarget and m:GetAttribute("unit")
     if type(u) ~= "string" then return false end
@@ -1730,18 +2025,25 @@ end
 
 -- out of range members fade, checked a few times a second
 local rangeFrame = CreateFrame("Frame")
-local sinceRange = 0
+local sinceRange, sinceRemind = 0, 0
+-- out of combat the reminders are read again every few seconds too: a member who just joined can get
+-- their unit before their frame shows or before the game has their buffs, and nothing else may
+-- change to read them again
+local REMIND_EVERY = 2
 rangeFrame:SetScript("OnUpdate", function(_, elapsed)
     sinceRange = sinceRange + elapsed
+    sinceRemind = sinceRemind + elapsed
     if sinceRange < 0.25 then return end
     sinceRange = 0
     local combat = fighting or InCombatLockdown()
+    local recheck = not combat and sinceRemind >= REMIND_EVERY
+    if recheck then sinceRemind = 0 end
     for _, m in ipairs(members) do
         if m.body and m:IsVisible() then
             UpdateRange(m)
             if not combat then
                 local state = ReminderState(m)
-                if state ~= m.reminderState then
+                if recheck or state ~= m.reminderState then
                     m.reminderState = state
                     UpdateReminders(m)
                 end
@@ -1999,6 +2301,7 @@ local function SetUp(b, a)
     b.shiftLabel, b.shiftIcon, b.shiftRank, b.shiftRightRank = nil, nil, nil, nil
     b.spellIDs, b.spellID, b.cdSpell, b.shiftCdSpell = nil, nil, nil, nil
     b.remind, b.remindNames, b.blockIDs, b.blocker = nil, nil, nil, nil
+    b.remindOnly = nil
     b.shiftBlockIDs, b.shiftBlocker, b.dispelTypes, b.shiftDispelTypes = nil, nil, nil, nil
     b.rankText:SetText("")
     -- a self only button casts on you whichever member it's on: its own unit comes before its
@@ -2024,10 +2327,12 @@ local function SetUp(b, a)
         b.blockIDs = BlockIDs(b.blocker)
         -- glows while the member has a debuff it dispels, see SetDispel
         b.dispelTypes = DispelTypes(main.id)
-        -- a reminder when its buff is missing on the member, see UpdateReminders
-        if a.remind then
+        -- a reminder when its buff is missing on the member, see UpdateReminders. A reminder only
+        -- button isn't in the row: it shows beside the frame only while the buff is missing.
+        if a.remind or a.remindOnly then
             b.remind = true
             b.remindNames = BuffNames(a.spell)
+            b.remindOnly = a.remindOnly and true or nil
         end
     elseif a.macro then
         local icon, body = MacroInfo(a.macro)
@@ -2096,8 +2401,9 @@ local function Dims()
 end
 
 -- lays out member frame m's bars, text and buttons in sizes d (see Dims). Self only buttons go on
--- it only when isMe. new(m) makes a button. Returns m's buttons and how many are in use.
-local function LayoutMember(m, d, isMe, new)
+-- it only when isMe, and buttons filtered to classes only when the member's class is one of them
+-- (class nil: all). new(m) makes a button. Returns m's buttons and how many are in use.
+local function LayoutMember(m, d, isMe, new, class)
     local db = DB()
     MakeMember(m)
     m.health:SetHeight(d.health)
@@ -2133,28 +2439,35 @@ local function LayoutMember(m, d, isMe, new)
     -- everyone's frame is as wide as yours, self only buttons and all
     local n, skipped = 0, 0
     for _, a in ipairs(db.actions) do
-        if a.self and not isMe then
+        if (a.self and not isMe) or not OCC.ForClass(a, class) then
             -- counted only when your own frame shows it: a spell you don't know or a deleted macro shows
-            -- on no one, so it takes no room
+            -- on no one, so it takes no room. A button for other classes takes its room too, so the
+            -- frames stay the same width.
             local usable
             if a.spell then
                 usable = ResolveSpell(a) ~= nil
             elseif a.macro then
                 usable = select(2, MacroInfo(a.macro)) ~= nil
             end
-            if usable then skipped = skipped + 1 end
+            -- a reminder only button takes no room in the row either
+            if usable and not (a.remindOnly and a.spell) then skipped = skipped + 1 end
         else
             local b = list[n + 1] or new(m)
             list[n + 1] = b
             if SetUp(b, a) then n = n + 1 end
         end
     end
-    -- rows of up to perRow buttons under the bars, 0 = all in one row, from the frame's left edge
+    -- rows of up to perRow buttons under the bars, 0 = all in one row, from the frame's left edge.
+    -- Reminder only buttons aren't in the rows: g counts the rest.
+    local g = 0
+    for i = 1, n do
+        if not list[i].remindOnly then g = g + 1 end
+    end
     local size = d.size
     local function Columns(count) return math.max(1, db.perRow > 0 and math.min(db.perRow, count) or count) end
-    local columns = Columns(n)
-    local rows = n > 0 and math.ceil(n / columns) or 0
-    local full = Columns(n + skipped)
+    local columns = Columns(g)
+    local rows = g > 0 and math.ceil(g / columns) or 0
+    local full = Columns(g + skipped)
     local width = math.max(db.width > 0 and db.width or MIN_WIDTH, full * size + (full - 1) * GAP + 2 * PAD)
     local top = PAD + d.health + 1 + d.power + PAD
     m:SetSize(width, top + (rows > 0 and rows * (size + GAP) - GAP + PAD or 0))
@@ -2176,18 +2489,27 @@ local function LayoutMember(m, d, isMe, new)
             end
         end)
     end
+    local k = 0
     for i = 1, n do
         local b = list[i]
-        local col, row = (i - 1) % columns, math.floor((i - 1) / columns)
         b:SetSize(size, size)
-        b:ClearAllPoints()
-        b:SetPoint("TOPLEFT", m, "TOPLEFT", PAD + col * (size + GAP), -(top + row * (size + GAP)))
-        b:Show()
+        if b.remindOnly then
+            -- hidden until its buff is missing on the member, see ShowReminders
+            b:Hide()
+        else
+            local col, row = k % columns, math.floor(k / columns)
+            k = k + 1
+            b:ClearAllPoints()
+            b:SetPoint("TOPLEFT", m, "TOPLEFT", PAD + col * (size + GAP), -(top + row * (size + GAP)))
+            b:Show()
+        end
     end
     for i = n + 1, #list do
         Clear(list[i])
+        list[i].remind, list[i].remindOnly = nil, nil
         list[i]:Hide()
     end
+    SyncFar(m)
     return list, n
 end
 
@@ -2324,13 +2646,17 @@ local function FillPreview(m, p, list, n)
         if b.previewBlock then b.previewBlock:SetShown(on) end
         -- the curse makes buttons that remove curses glow purple
         local glow = db.dispelGlow and p.curse and i <= n and b.dispelTypes and b.dispelTypes.Curse and true or false
-        if glow and not b.previewGlow then
-            b.previewGlow = CreateFrame("Frame", nil, b)
-            b.previewGlow:SetAllPoints()
-            b.previewGlow:SetFrameLevel(b:GetFrameLevel() + 4)
-            for _, t in ipairs(DispelBorder(b.previewGlow)) do t:SetVertexColor(CURSE[1], CURSE[2], CURSE[3]) end
+        -- one frame per style, made when first shown
+        local style = DispelStyle()
+        b.previewGlows = b.previewGlows or {}
+        if glow and not b.previewGlows[style] then
+            local g = CreateFrame("Frame", nil, b)
+            g:SetAllPoints()
+            g:SetFrameLevel(b:GetFrameLevel() + 4)
+            for _, t in ipairs(DispelBorder(g, style)) do t:SetVertexColor(CURSE[1], CURSE[2], CURSE[3]) end
+            b.previewGlows[style] = g
         end
-        if b.previewGlow then b.previewGlow:SetShown(glow) end
+        for s, g in pairs(b.previewGlows) do g:SetShown(glow and s == style) end
     end
     m.body:SetAlpha(p.far and FADED or 1)
     m.farOverlay:SetAlpha(db.rangeRed and p.far and 1 or 0)
@@ -2361,7 +2687,8 @@ local function UpdatePreview()
     local d = Dims()
     local above
     for i, m in ipairs(previewMembers) do
-        FillPreview(m, PREVIEW[i], LayoutMember(m, d, i == 1, PreviewButton))
+        local class = PREVIEW[i].you and Known(select(2, UnitClass("player"))) or PREVIEW[i].class
+        FillPreview(m, PREVIEW[i], LayoutMember(m, d, i == 1, PreviewButton, class))
         m:ClearAllPoints()
         if above then
             m:SetPoint("TOP", above, "BOTTOM", 0, -SPACING)
@@ -2414,7 +2741,7 @@ function OCC.Sync()
     for _, m in ipairs(frames) do
         -- self only buttons go on your own frame only
         m.isMe = IsMe(m)
-        local list, n = LayoutMember(m, d, m.isMe, NewButton)
+        local list, n = LayoutMember(m, d, m.isMe, NewButton, OCC.MemberClass(m))
         SetAuraUnit(m)
         for i = 1, #list do
             SetSwipe(m, i, list[i])
@@ -2426,7 +2753,7 @@ function OCC.Sync()
         -- for the target frame's range, see UpdateRange. Self only buttons don't reach the target.
         m.rangeSpell = nil
         for i = n, 1, -1 do
-            if not list[i].selfOnly then m.rangeSpell = list[i].spellID or m.rangeSpell end
+            if not list[i].selfOnly and not list[i].remindOnly then m.rangeSpell = list[i].spellID or m.rangeSpell end
         end
     end
     -- after the members are set up. Alone, your own frame shows only with the solo option on. In a
@@ -2508,6 +2835,7 @@ OCC.SpellName, OCC.SpellIcon, OCC.RankText, OCC.MacroInfo = SpellName, SpellIcon
 OCC.ResolveShift, OCC.ShiftText = ResolveShift, ShiftText
 OCC.ResolveShiftRight = ResolveShiftRight
 OCC.Textures = Textures
+OCC.DISPEL_STYLES, OCC.DISPEL_STYLE_NAMES, OCC.DispelStyle = DISPEL_STYLES, DISPEL_STYLE_NAMES, DispelStyle
 -- the member frames that are showing
 function OCC.ShownMembers()
     local n = 0
@@ -2554,7 +2882,20 @@ local function Describe(i, a)
         text = ("%d. macro %s%s"):format(i, a.macro, body:find("@unit") and "" or " (has no @unit)")
     end
     return text .. ", shift-click " .. ShiftText(a) .. (a.self and ", on you only" or "")
-        .. (a.remind and ", reminds when missing" or "")
+        .. (a.noDownrank and a.spell and ", never downranked" or "")
+        .. (a.remindOnly and a.spell and ", reminder only (beside the frame when missing)"
+            or a.remind and ", reminds when missing" or "")
+        .. (OCC.ClassesText(a) and (", for " .. OCC.ClassesText(a)) or "")
+end
+
+-- the classes button a shows for, ex: "Mage, Priest", or nil when it shows for everyone
+function OCC.ClassesText(a)
+    if type(a.classes) ~= "table" or not next(a.classes) then return nil end
+    local names = {}
+    for _, c in ipairs(OCC.CLASSES) do
+        if a.classes[c] then table.insert(names, OCC.ClassName(c)) end
+    end
+    return table.concat(names, ", ")
 end
 
 local function Changed()
@@ -2583,6 +2924,39 @@ function OCC.SetRemind(i, on)
     local a = DB().actions[i]
     if not a then return end
     a.remind = on and true or nil
+    Changed()
+end
+
+-- spell button i isn't in the row: it shows beside a member's frame only while they're missing its
+-- buff, to click and buff them. For buffs cast now and then. See ShowReminders.
+function OCC.SetRemindOnly(i, on)
+    local a = DB().actions[i]
+    if not a then return end
+    a.remindOnly = on and true or nil
+    Changed()
+end
+
+-- spell button i never casts a lower rank: right-click (when it goes a rank down), auto shift-click
+-- and shift-right-click cast its own rank. A shift-click spell you picked is left as it is.
+function OCC.SetNoDownrank(i, on)
+    local a = DB().actions[i]
+    if not a then return end
+    a.noDownrank = on and true or nil
+    Changed()
+end
+
+-- button i shows under members of class too, or no longer (on false). class nil: everyone again.
+-- With no class ticked it shows for everyone.
+function OCC.SetClass(i, class, on)
+    local a = DB().actions[i]
+    if not a then return end
+    if class == nil then
+        a.classes = nil
+    else
+        a.classes = type(a.classes) == "table" and a.classes or {}
+        a.classes[class] = on and true or nil
+        if not next(a.classes) then a.classes = nil end
+    end
     Changed()
 end
 
@@ -2655,6 +3029,20 @@ end
 -- a dispel spell's button glows in the colour of a debuff it can remove. Out of combat only, see Sync.
 function OCC.SetDispelGlow(on)
     DB().dispelGlow = on and true or false
+    Changed()
+end
+
+-- the dispel glow's look: one of DISPEL_STYLES. Out of combat only, see Sync.
+function OCC.SetDispelStyle(style)
+    if not DISPEL_STYLE_NAMES[style] then return end
+    DB().dispelStyle = style
+    Changed()
+end
+
+-- the reminder glow's look: one of REMIND_GLOWS. Out of combat only, like the reminders.
+function OCC.SetRemindGlowStyle(kind)
+    if not OCC.REMIND_GLOW_NAMES[kind] then return end
+    DB().remindGlow = kind
     Changed()
 end
 
@@ -2938,6 +3326,9 @@ local HELP = {
     "/occ right down|up - right-click casts a rank lower or higher",
     "/occ self <n> - button n casts on you only, whichever member it's on, or on the member again",
     "/occ remind <n> - spell button n's buff shows beside members who don't have it, and the button glows (out of combat)",
+    "/occ remindonly <n> - spell button n isn't in the row: it shows beside members missing its buff, to click (out of combat)",
+    "/occ nodownrank <n> - spell button n never casts a lower rank on right-click or shift-click",
+    "/occ class <n> <class> - button n shows under that class too, or no longer; all = everyone",
     "/occ perrow <n> - buttons in each row before the next, 0 = all in one row",
     "/occ width <n> - each member's frame width, 0 = 100, never narrower than its buttons",
     "/occ barheight <n> - health bar height, 0 = 22",
@@ -2955,6 +3346,8 @@ local HELP = {
     "/occ swipes - a swipe on a button while your buff from its spell is on the member",
     "/occ blocked - a red mark on a button while a debuff stops its spell on the member, ex: Weakened Soul",
     "/occ dispelglow - a dispel spell's button glows in the colour of a debuff it can remove",
+    "/occ dispelstyle [border|thick|glow|tint|corner|alert] - how the dispel glow looks, no name = the next one",
+    "/occ remindglow [pulse|flash|steady|alert|none] - the glow on reminders, no name = the next one",
     "/occ rangered - red over a member's buttons while they're out of range",
     "/occ tooltips - tooltips on the buttons",
     "/occ membertooltips - the members' tooltips, bottom right of the screen",
@@ -2968,6 +3361,7 @@ local HELP = {
     "/occ delete <name> - delete a set",
     "/occ preview - show or end a made-up full party, to see how the frames look (not in a group or combat)",
     "/occ frames - print the party frame's state, for finding problems",
+    "/occ reminders - print why each member's buff reminders show or not, for finding problems",
 }
 
 SLASH_OPCOWSCLICKCAST1 = "/occ"
@@ -3034,6 +3428,37 @@ SlashCmdList.OPCOWSCLICKCAST = function(msg)
     elseif cmd == "dispelglow" then
         OCC.SetDispelGlow(not db.dispelGlow)
         Print("dispel glow on the buttons " .. (db.dispelGlow and "on" or "off") .. ".")
+    elseif cmd == "dispelstyle" then
+        local style = rest:lower()
+        if style == "" then
+            local cur = 1
+            for i, s in ipairs(DISPEL_STYLES) do
+                if s == DispelStyle() then cur = i end
+            end
+            style = DISPEL_STYLES[cur % #DISPEL_STYLES + 1]
+        end
+        if not DISPEL_STYLE_NAMES[style] then
+            Print("dispel glow styles: " .. table.concat(DISPEL_STYLES, ", ") .. ".")
+            return
+        end
+        OCC.SetDispelStyle(style)
+        Print("dispel glow: " .. DISPEL_STYLE_NAMES[style]:lower() .. ".")
+    elseif cmd == "remindglow" then
+        local kind, list = rest:lower():gsub("%s", ""), OCC.REMIND_GLOWS
+        if kind == "spellalert" then kind = "alert" end
+        if kind == "" then
+            local cur = 1
+            for i, s in ipairs(list) do
+                if s == db.remindGlow then cur = i end
+            end
+            kind = list[cur % #list + 1]
+        end
+        if not OCC.REMIND_GLOW_NAMES[kind] then
+            Print("reminder glows: " .. table.concat(list, ", ") .. ".")
+            return
+        end
+        OCC.SetRemindGlowStyle(kind)
+        Print("reminder glow: " .. OCC.REMIND_GLOW_NAMES[kind]:lower() .. ".")
     elseif cmd == "rangered" then
         OCC.SetRangeRed(not db.rangeRed)
         Print("red buttons for members out of range " .. (db.rangeRed and "on" or "off") .. ".")
@@ -3086,6 +3511,41 @@ SlashCmdList.OPCOWSCLICKCAST = function(msg)
             return
         end
         OCC.SetRemind(n, not db.actions[n].remind)
+        Print(Describe(n, db.actions[n]))
+    elseif cmd == "remindonly" and db.actions[tonumber(rest) or 0] then
+        local n = tonumber(rest)
+        if not db.actions[n].spell then
+            Print("only spell buttons can remind: a macro's buff isn't known.")
+            return
+        end
+        OCC.SetRemindOnly(n, not db.actions[n].remindOnly)
+        Print(Describe(n, db.actions[n]))
+    elseif cmd == "nodownrank" and db.actions[tonumber(rest) or 0] then
+        local n = tonumber(rest)
+        if not db.actions[n].spell then
+            Print("only spell buttons have ranks.")
+            return
+        end
+        OCC.SetNoDownrank(n, not db.actions[n].noDownrank)
+        Print(Describe(n, db.actions[n]))
+    elseif cmd == "class" and db.actions[tonumber(rest:match("^(%d+)") or "") or 0] then
+        local n = tonumber(rest:match("^(%d+)"))
+        local name = (rest:match("^%d+%s*(.*)$") or ""):upper():gsub("%s", "")
+        local a = db.actions[n]
+        if name == "" or name == "ALL" then
+            OCC.SetClass(n, nil)
+        else
+            local class
+            for _, c in ipairs(OCC.CLASSES) do
+                if c == name or (OCC.ClassName(c):upper():gsub("%s", "")) == name then class = c end
+            end
+            if not class then
+                Print("no class " .. name:lower() .. ". One of: warrior, paladin, hunter, rogue, priest, shaman, "
+                    .. "mage, warlock, druid, or all.")
+                return
+            end
+            OCC.SetClass(n, class, not (a.classes and a.classes[class]))
+        end
         Print(Describe(n, db.actions[n]))
     elseif cmd == "perrow" and tonumber(rest) and tonumber(rest) >= 0 then
         db.perRow = math.floor(tonumber(rest))
@@ -3148,6 +3608,8 @@ SlashCmdList.OPCOWSCLICKCAST = function(msg)
         end
     elseif cmd == "frames" then
         FrameReport()
+    elseif cmd == "reminders" then
+        ReminderReport()
     elseif cmd == "preview" then
         local was = previewOn
         OCC.SetPreview(not previewOn)

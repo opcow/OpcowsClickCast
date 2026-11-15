@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.27.0
+
+### Added
+
+- Reminder only: a buff's button can leave the row under each member and only show beside their frame while they're missing the buff, so buffs you cast now and then don't take up room. Click it there to cast the buff on them. Like reminders, it shows out of combat only. Tick "Reminder only" on the button or use `/occ remindonly <n>`.
+- Never downrank: a spell's button can always cast its own rank. Right-click (when set to a rank lower), shift-click on Auto and shift-right-click cast that rank too. A shift-click spell you picked and right-click a rank higher still work. Tick "Never downrank" on the button or use `/occ nodownrank <n>`.
+- The dispel glow has a choice of looks: Border (as before), Thick border, Glow (the action bar's glowing edge), Tint (the colour over the whole icon) Corner (a square in the top right) or Spell alert (the look of a proc's glow: marching ants round the button and a pulsing glow, in the debuff's colour). Pick it with the button beside "Dispel glow" in the options, or `/occ dispelstyle <name>`.
+- Class filter: a button can show only under members of the classes you pick, ex: Arcane Intellect under mana users. Frames keep the same width, and the target frame shows every button. Pick them with the "Classes" button beside Rank, or `/occ class <n> <class>` (`all` for everyone).
+- Reminder glow: a button and its icon beside the frame glow, as in Buff Reminder, while a member is missing the buff, in place of the orange border. Pulse (the default), Flash, Steady, Spell alert or None. Pick it with the "Reminder glow" button in the options, or `/occ remindglow <name>`.
+- `/occ reminders` prints why each member's buff reminders show or not.
+
+### Fixed
+
+- A member who just joined the group could get no buff reminder until something else changed, ex: they died. Reminders are now checked again every 2 seconds out of combat.
+
 ## 0.26.0
 
 ### Added
