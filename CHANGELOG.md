@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.28.0
+
+### Fixed
+
+- The Spell alert dispel glow showed only a faint grey pulse: its marching ants needed a script, which the game doesn't allow in its aura buttons. It's now the action bar's own gold proc glow, the same animation the game plays on a proc, whatever the debuff's colour.
+- The Spell alert, Glow and Corner dispel looks were drawn inside the button, or at the wrong size, instead of round its edges. They're now sized from the spell button, and follow a change of the Size option.
+
 ## 0.27.0
 
 ### Added

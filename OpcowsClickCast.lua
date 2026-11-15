@@ -968,12 +968,12 @@ local DISPEL_MAKERS = {
     border = function(button) return DispelEdges(button, 2) end,
     thick = function(button) return DispelEdges(button, 4) end,
     -- the action bar's glowing border, past the button's edges by a share of its size
-    glow = function(button)
+    glow = function(button, size)
         local t = button:CreateTexture(nil, "OVERLAY")
         t:SetTexture("Interface\\Buttons\\UI-ActionButton-Border")
         t:SetBlendMode("ADD")
         local function Fit()
-            local w = button:GetWidth() or 0
+            local w = size or button:GetWidth() or 0
             local out = math.floor(w * 0.36 + 0.5)
             t:ClearAllPoints()
             t:SetPoint("TOPLEFT", -out, out)
@@ -992,22 +992,55 @@ local DISPEL_MAKERS = {
         return { t }
     end,
     -- a square in the top right corner, a third of the button
-    corner = function(button)
+    corner = function(button, size)
         local t = button:CreateTexture(nil, "OVERLAY")
         t:SetPoint("TOPRIGHT")
         t:SetTexture("Interface\\Buttons\\WHITE8X8")
         local function Fit()
-            local w = math.max(4, math.floor((button:GetWidth() or 0) / 3 + 0.5))
+            local w = math.max(4, math.floor((size or button:GetWidth() or 0) / 3 + 0.5))
             t:SetSize(w, w)
         end
         Fit()
         pcall(button.HookScript, button, "OnSizeChanged", Fit)
         return { t }
     end,
-    -- the look of the game's spell alert (a proc's glow): a soft glow and marching ants past the
-    -- button's edges, the glow pulsing. Made grey so the dispel colour shows true. Only looks: what
-    -- shows it is the aura slot, so it works in combat.
-    alert = function(button)
+    -- the game's spell alert (a proc's glow): its own gold loop, 30 frames of a 6 by 5 sheet a
+    -- second, 1.4 times the button, as the action bar draws it. The game's alert itself can't be
+    -- used: it's started by a call when the proc happens, and auras are secret in combat, so
+    -- nothing knows when to call it; and it's a frame with scripts, which the aura button refuses.
+    -- Only looks: what shows it is the aura slot, so it works in combat. Gold, not in the dispel
+    -- colour (returns no textures to tint): the button says what it removes. On a client without
+    -- the loop, the older look below.
+    alert = function(button, size)
+        local atlas = "UI-HUD-ActionBar-Proc-Loop-Flipbook"
+        local okA, info = pcall(C_Texture.GetAtlasInfo, atlas)
+        if okA and info then
+            local loop = button:CreateTexture(nil, "OVERLAY")
+            loop:SetAtlas(atlas)
+            local function FitLoop()
+                local out = math.floor((size or button:GetWidth() or 0) * 0.2 + 0.5)
+                loop:ClearAllPoints()
+                loop:SetPoint("TOPLEFT", -out, out)
+                loop:SetPoint("BOTTOMRIGHT", out, -out)
+            end
+            FitLoop()
+            pcall(button.HookScript, button, "OnSizeChanged", FitLoop)
+            pcall(function()
+                local spin = loop:CreateAnimationGroup()
+                spin:SetLooping("REPEAT")
+                local fb = spin:CreateAnimation("FlipBook")
+                fb:SetDuration(1)
+                fb:SetFlipBookRows(6)
+                fb:SetFlipBookColumns(5)
+                fb:SetFlipBookFrames(30)
+                fb:SetFlipBookFrameWidth(0)
+                fb:SetFlipBookFrameHeight(0)
+                spin:Play()
+            end)
+            return {}
+        end
+        -- the older alert: a soft glow and marching ants past the button's edges, the glow
+        -- pulsing, made grey so the dispel colour shows true
         local glow = button:CreateTexture(nil, "OVERLAY")
         glow:SetTexture("Interface\\SpellActivationOverlay\\IconAlert")
         glow:SetTexCoord(0.0078125, 0.5078125, 0.27734375, 0.52734375)
@@ -1019,7 +1052,7 @@ local DISPEL_MAKERS = {
             pcall(t.SetDesaturated, t, true)
         end
         local function Fit()
-            local w = button:GetWidth() or 0
+            local w = size or button:GetWidth() or 0
             local out = math.floor(w * 0.2 + 0.5)
             for _, t in ipairs({ glow, ants }) do
                 t:ClearAllPoints()
@@ -1038,17 +1071,21 @@ local DISPEL_MAKERS = {
             a:SetDuration(0.5)
             pulse:Play()
         end)
-        -- the ants' 22 frames, 48 pixels square, 5 to a row of the 256 sheet. A child frame's
-        -- OnUpdate, so it only runs while the slot shows.
-        local tick = CreateFrame("Frame", nil, button)
-        local elapsed, frame = 0, 0
-        tick:SetScript("OnUpdate", function(_, e)
-            elapsed = elapsed + e
-            if elapsed < 0.01 then return end
-            frame = (frame + math.floor(elapsed / 0.01)) % 22
-            elapsed = elapsed % 0.01
-            local l, t = (frame % 5) * 48 / 256, math.floor(frame / 5) * 48 / 256
-            ants:SetTexCoord(l, l + 48 / 256, t, t + 48 / 256)
+        -- the ants' 22 frames, 48 pixels square, 5 to a row of the 256 sheet, as a flipbook: frames
+        -- in the game's aura button can't get scripts, so no OnUpdate. Still ants if it can't.
+        pcall(function()
+            local march = ants:CreateAnimationGroup()
+            march:SetLooping("REPEAT")
+            local fb = march:CreateAnimation("FlipBook")
+            fb:SetFlipBookRows(5)
+            fb:SetFlipBookColumns(5)
+            fb:SetFlipBookFrames(22)
+            fb:SetFlipBookFrameWidth(48)
+            fb:SetFlipBookFrameHeight(48)
+            fb:SetDuration(0.22)
+            march:Play()
+            -- the flipbook picks the frame from the whole sheet
+            ants:SetTexCoord(0, 1, 0, 1)
         end)
         return { glow, ants }
     end,
@@ -1056,8 +1093,8 @@ local DISPEL_MAKERS = {
 
 -- the dispel highlight on a button in style (the option's when nil), coloured by the game in the
 -- dispel type of the debuff
-local function DispelBorder(button, style)
-    local out = DISPEL_MAKERS[style or DispelStyle()](button)
+local function DispelBorder(button, style, size)
+    local out = DISPEL_MAKERS[style or DispelStyle()](button, size)
     for _, t in ipairs(out) do
         if button.AddDispelTypeTexture then
             local ok, err = pcall(function()
@@ -1078,7 +1115,13 @@ local function SetDispelSlot(m, i, b, prefix, fields)
     if not c then return end
     local ok, err = pcall(function()
         local style = DispelStyle()
-        local key = prefix .. (style == "border" and "" or style) .. i
+        -- the game's button is still 0 wide when its looks are made, and can't hook its resize, so
+        -- they're sized from the spell button's size now. Looks that depend on it get a slot per
+        -- size, so a change of the Size option makes new ones.
+        local w = b:GetWidth()
+        w = w and w > 0 and math.floor(w + 0.5) or nil
+        local sized = w and (style == "glow" or style == "corner" or style == "alert")
+        local key = prefix .. (style == "border" and "" or style) .. (sized and ("s" .. w .. "_") or "") .. i
         local old = b[fields.key]
         if old and old ~= key then
             c:SetAuraSlotCandidateFilters(old, { includeSpellIDs = NO_SPELLS })
@@ -1087,7 +1130,7 @@ local function SetDispelSlot(m, i, b, prefix, fields)
         end
         b[fields.key] = key
         -- RAID: only debuffs you can dispel. Over the can't-cast mark.
-        local slot = ButtonSlot(m, key, "HARMFUL|RAID", function(button) DispelBorder(button, style) end, 14)
+        local slot = ButtonSlot(m, key, "HARMFUL|RAID", function(button) DispelBorder(button, style, w) end, 14)
         b[fields.slot] = slot
         slot:ClearAllPoints()
         slot:SetAllPoints(b)

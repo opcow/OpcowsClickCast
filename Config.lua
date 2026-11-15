@@ -1133,8 +1133,8 @@ local function CreateConfig()
     Tooltip(dispelStyle, "Dispel glow look", "|cffffffffBorder|r: a thin border round the button.\n"
         .. "|cffffffffThick border|r: a wider one.\n|cffffffffGlow|r: the action bar's glowing edge, past the "
         .. "button's sides.\n|cffffffffTint|r: the colour over the whole icon.\n|cffffffffCorner|r: a square "
-        .. "in the top right corner.\n|cffffffffSpell alert|r: the look of a proc's glow, marching "
-        .. "round the button, pulsing.\n\nLeft-click for the next one, right-click for the one before. Try "
+        .. "in the top right corner.\n|cffffffffSpell alert|r: the action bar's gold proc glow, "
+        .. "whatever the debuff.\n\nLeft-click for the next one, right-click for the one before. Try "
         .. "them with Preview. Changes apply out of combat.")
     local blocked = Check(f, "Can't-cast marks", function(v)
         OCC.SetBlocked(v)

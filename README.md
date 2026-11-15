@@ -18,7 +18,7 @@ Open the options window with `/occ`, the minimap button or the addon compartment
 - **Never downrank** makes a button always cast its own rank, on every click.
 - **Classes** shows a button only under members of the classes you pick, ex: Arcane Intellect under mana users.
 
-Each button shows the spell's cooldown. It also shows a swipe while your own buff or HoT from that spell is on the member, ex: Renew. A button turns red while the member has a debuff that stops you casting its spell on them, ex: Weakened Soul for Power Word: Shield, with a swipe showing when it wears off. A dispel spell's button (Dispel Magic, Cure Disease, Remove Curse, Cure Poison, Purify, Cleanse) gets a highlight in the debuff's colour while the member has a debuff it can remove, in combat too. Pick its look: Border, Thick border, Glow, Tint, Corner or Spell alert.
+Each button shows the spell's cooldown. It also shows a swipe while your own buff or HoT from that spell is on the member, ex: Renew. A button turns red while the member has a debuff that stops you casting its spell on them, ex: Weakened Soul for Power Word: Shield, with a swipe showing when it wears off. A dispel spell's button (Dispel Magic, Cure Disease, Remove Curse, Cure Poison, Purify, Cleanse) gets a highlight in the debuff's colour while the member has a debuff it can remove, in combat too. Pick its look: Border, Thick border, Glow, Tint, Corner or Spell alert (the action bar's gold proc glow, whatever the colour).
 
 ## The frame
 

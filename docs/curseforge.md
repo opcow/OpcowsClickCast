@@ -12,7 +12,7 @@
 - **Buff reminders.** Tick **Remind** on a buff's button. Out of combat, members missing that buff get its icon beside their frame, and the button glows. Group buffs count too, ex: Prayer of Fortitude for Power Word: Fortitude. Tick **Reminder only** too and the button leaves the row, showing beside the frame only while the member needs it. Pick the reminder glow: Pulse, Flash, Steady or Spell alert.
 - **Class filter.** Show a button only under the classes you pick, ex: Arcane Intellect under mana users.
 - **Cooldowns** show on each button, along with a swipe while your HoT or buff from that spell is on the member. A button turns red while a debuff stops its spell on that member, ex: Weakened Soul for Power Word: Shield.
-- **Dispel glow.** Your dispel button lights up in the debuff's colour while the member has something it can remove, ex: Dispel Magic glows blue on magic. In combat too. Pick its look: Border, Thick border, Glow, Tint, Corner or Spell alert.
+- **Dispel glow.** Your dispel button lights up in the debuff's colour while the member has something it can remove, ex: Dispel Magic glows blue on magic. In combat too. Pick its look: Border, Thick border, Glow, Tint, Corner or Spell alert (the action bar's gold proc glow, whatever the colour).
 
 ## The frame
 
