@@ -1016,6 +1016,9 @@ local function CreateConfig()
     Tooltip(width, "Width", "Each member's frame width. It's never narrower than its buttons. 0 = 100.")
     local scale = NumberBox("Scale %:", width, "scale", 200)
     Tooltip(scale, "Scale", "The size of the whole party frame, buttons too, from 50 to 200 percent.")
+    local gap = NumberBox("Spacing:", scale, "gap", 30)
+    Tooltip(gap, "Button spacing", "Pixels between the buttons, side by side and between rows, from 0 to "
+        .. "30. 2 by default.")
 
     -- the checkboxes go in a grid of two columns, related ones side by side
     local checks = CreateFrame("Frame", nil, f)
@@ -1367,6 +1370,7 @@ local function CreateConfig()
         if not width:HasFocus() then width:SetText(tostring(db.width)) end
         if not barHeight:HasFocus() then barHeight:SetText(tostring(db.barHeight)) end
         if not scale:HasFocus() then scale:SetText(tostring(db.scale)) end
+        if not gap:HasFocus() then gap:SetText(tostring(db.gap)) end
         style:SetText("Bars: " .. db.texture)
         minimap:SetChecked(not db.minimap.hide)
         debug:SetChecked(db.debug and true or false)

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.29.0
+
+### Added
+
+- Spacing option: the pixels between buttons, side by side and between rows, from 0 to 30 (2 as before). It's next to Width and Scale, or use `/occ spacing <n>`.
+
 ## 0.28.0
 
 ### Fixed

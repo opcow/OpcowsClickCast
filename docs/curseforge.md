@@ -19,7 +19,7 @@
 - Health, power, incoming heals, your buffs, dispellable debuff colours, threat, role icons, range fading and class colours. All of these work in combat.
 - **Out of range** members get red buttons, and a button never casts on you instead.
 - A **target frame** for a friendly player who isn't in your party, with the same buttons. It's outlined in purple so it's never mistaken for a party member.
-- Set the button size, buttons per row, width, bar height, scale, bar texture and sort order (group, role or name).
+- Set the button size, buttons per row, spacing between buttons, width, bar height, scale, bar texture and sort order (group, role or name).
 - Optionally hide Blizzard's party frames, or show your own frame when you're not in a group.
 - **Preview** shows made up party members, so you can set everything up while solo.
 

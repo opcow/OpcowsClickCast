@@ -26,7 +26,7 @@ Each member shows health, power, incoming heals, your buffs, dispellable debuff 
 
 When you target a friendly player who isn't in your party, a target frame shows under the party with the same buttons. It has a purple outline, so it can't be mistaken for a party member.
 
-The options window sets the button size, buttons per row, frame width, bar height, scale, bar texture and sort order (group, role or name). It can also show your frame when you're not in a group, and hide Blizzard's party frames. Unlock the frame to drag it. **Preview** shows made up party members, so you can see the layout while solo.
+The options window sets the button size, buttons per row, the spacing between buttons, frame width, bar height, scale, bar texture and sort order (group, role or name). It can also show your frame when you're not in a group, and hide Blizzard's party frames. Unlock the frame to drag it. **Preview** shows made up party members, so you can see the layout while solo.
 
 ## Button sets
 

@@ -9,8 +9,10 @@
 local OCC = {}
 _G.OpcowsClickCast = OCC
 
--- between buttons
+-- between buttons when the spacing option isn't set
 local GAP = 2
+-- the most the spacing option takes
+local MAX_GAP = 30
 -- inside a member's frame, around the bars and the buttons
 local PAD = 3
 local HEALTH = 22
@@ -64,6 +66,9 @@ local function DB()
     if type(db.size) ~= "number" or db.size < 0 then db.size = 0 end
     -- buttons in a row under each member before the next row, 0 = all in one row
     if type(db.perRow) ~= "number" or db.perRow < 0 then db.perRow = 0 end
+    -- pixels between buttons, 0 = touching
+    if type(db.gap) ~= "number" or db.gap < 0 then db.gap = GAP end
+    db.gap = math.min(MAX_GAP, math.floor(db.gap))
     -- a member's frame width, 0 = MIN_WIDTH. It's never narrower than its buttons.
     if type(db.width) ~= "number" or db.width < 0 then db.width = 0 end
     -- health bar height, 0 = HEALTH
@@ -2506,14 +2511,14 @@ local function LayoutMember(m, d, isMe, new, class)
     for i = 1, n do
         if not list[i].remindOnly then g = g + 1 end
     end
-    local size = d.size
+    local size, gap = d.size, db.gap
     local function Columns(count) return math.max(1, db.perRow > 0 and math.min(db.perRow, count) or count) end
     local columns = Columns(g)
     local rows = g > 0 and math.ceil(g / columns) or 0
     local full = Columns(g + skipped)
-    local width = math.max(db.width > 0 and db.width or MIN_WIDTH, full * size + (full - 1) * GAP + 2 * PAD)
+    local width = math.max(db.width > 0 and db.width or MIN_WIDTH, full * size + (full - 1) * gap + 2 * PAD)
     local top = PAD + d.health + 1 + d.power + PAD
-    m:SetSize(width, top + (rows > 0 and rows * (size + GAP) - GAP + PAD or 0))
+    m:SetSize(width, top + (rows > 0 and rows * (size + gap) - gap + PAD or 0))
     m.myHeal:SetWidth(width - 2 * PAD)
     m.otherHeal:SetWidth(width - 2 * PAD)
     UpdateHeals(m)
@@ -2543,7 +2548,7 @@ local function LayoutMember(m, d, isMe, new, class)
             local col, row = k % columns, math.floor(k / columns)
             k = k + 1
             b:ClearAllPoints()
-            b:SetPoint("TOPLEFT", m, "TOPLEFT", PAD + col * (size + GAP), -(top + row * (size + GAP)))
+            b:SetPoint("TOPLEFT", m, "TOPLEFT", PAD + col * (size + gap), -(top + row * (size + gap)))
             b:Show()
         end
     end
@@ -3373,6 +3378,7 @@ local HELP = {
     "/occ nodownrank <n> - spell button n never casts a lower rank on right-click or shift-click",
     "/occ class <n> <class> - button n shows under that class too, or no longer; all = everyone",
     "/occ perrow <n> - buttons in each row before the next, 0 = all in one row",
+    "/occ spacing <n> - pixels between buttons, 0 to 30, 2 by default",
     "/occ width <n> - each member's frame width, 0 = 100, never narrower than its buttons",
     "/occ barheight <n> - health bar height, 0 = 22",
     "/occ scale <n> - the whole frame's size in percent, 50 to 200",
@@ -3593,6 +3599,10 @@ SlashCmdList.OPCOWSCLICKCAST = function(msg)
     elseif cmd == "perrow" and tonumber(rest) and tonumber(rest) >= 0 then
         db.perRow = math.floor(tonumber(rest))
         Print(db.perRow == 0 and "buttons all in one row." or ("%d buttons in each row."):format(db.perRow))
+        Changed()
+    elseif cmd == "spacing" and tonumber(rest) and tonumber(rest) >= 0 then
+        db.gap = math.min(MAX_GAP, math.floor(tonumber(rest)))
+        Print(("%d pixels between buttons."):format(db.gap))
         Changed()
     elseif cmd == "width" and tonumber(rest) and tonumber(rest) >= 0 then
         db.width = math.floor(tonumber(rest))
