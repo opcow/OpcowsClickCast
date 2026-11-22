@@ -401,6 +401,8 @@ local function ActionItem(i, a)
     end
     local classes = OCC.ClassesText(a)
     if classes then item.text = item.text .. "  |cff808080for " .. classes .. "|r" end
+    local roles = OCC.RolesText(a)
+    if roles then item.text = item.text .. "  |cff808080for " .. roles .. "|r" end
     return item
 end
 
@@ -795,9 +797,27 @@ local function CreateConfig()
                 onClick = function() OCC.SetClass(i, c, not on) end,
             })
         end
+        -- roles, after the classes: they count only in a group
+        local anyRole = type(a.roles) == "table" and next(a.roles) ~= nil
+        table.insert(rows, {
+            text = "Any role  |cff808080no filter|r", selected = not anyRole,
+            tip = { "Any role", "The button shows under every member, whatever their group role." },
+            onClick = function() OCC.SetRole(i, nil) end,
+        })
+        for _, r in ipairs(OCC.ROLES) do
+            local on = anyRole and a.roles[r] and true or false
+            table.insert(rows, {
+                text = OCC.RoleName(r) .. (on and "  |cff808080shown|r" or ""),
+                selected = on,
+                tip = { OCC.RoleName(r), "Click to show the button under " .. OCC.RoleName(r):lower()
+                    .. " members in a group, or click again to stop. Tick as many roles as you like.\n\n"
+                    .. "Not in a group, or for a member with no role, it shows anyway." },
+                onClick = function() OCC.SetRole(i, r, not on) end,
+            })
+        end
         return rows
     end
-    local classes = Button(f, "Classes: all", 120, function()
+    local classes = Button(f, "For: everyone", 120, function()
         if not selected then return end
         if picker:IsShown() and picker.kind == "class" then picker:Hide() return end
         picker.kind = "class"
@@ -807,9 +827,11 @@ local function CreateConfig()
     classes:SetPoint("LEFT", rank, "RIGHT", 4, 0)
     -- kept on the rank button: Refresh is at Lua 5.1's limit of 60 upvalues
     rank.classes, classes.Rows = classes, ClassRows
-    Tooltip(classes, "Classes", "Show the selected button only under members of the classes you pick, ex: "
-        .. "Arcane Intellect under mana users, or a Blessing under warriors. With none picked it shows under "
-        .. "everyone.\n\nThe frames keep the same width: a button another class doesn't get leaves its room. "
+    Tooltip(classes, "Classes and roles", "Show the selected button only under members of the classes you pick, "
+        .. "ex: Arcane Intellect under mana users, or a Blessing under warriors. With none picked it shows under "
+        .. "everyone.\n\nIn a group you can pick roles too, ex: Power Word: Shield under tanks. Not in a group, "
+        .. "or for a member with no role, the roles are ignored. With both picked, a member needs one of each."
+        .. "\n\nThe frames keep the same width: a button another member doesn't get leaves its room. "
         .. "The target frame shows every button.\n\nChanges apply out of combat. If someone joins in combat, "
         .. "their buttons follow their class when combat ends.")
 
@@ -1301,13 +1323,19 @@ local function CreateConfig()
 
         local a = selected and actions[selected]
         rank.classes:SetEnabled(a and true or false)
-        local filter = a and OCC.ClassesText(a)
+        -- "For: Mage", "For: Healer", or counts when it's too long for the button
+        local cls, rls = a and OCC.ClassesText(a), a and OCC.RolesText(a)
+        local filter = cls and rls and (cls .. ", " .. rls) or cls or rls
         if filter and #filter > 12 then
-            local n = 0
-            for _ in pairs(a.classes) do n = n + 1 end
-            filter = n .. " classes"
+            local nc, nr = 0, 0
+            for _ in pairs(cls and a.classes or {}) do nc = nc + 1 end
+            for _ in pairs(rls and a.roles or {}) do nr = nr + 1 end
+            local parts = {}
+            if nc > 0 then table.insert(parts, nc == 1 and cls or (nc .. " classes")) end
+            if nr > 0 then table.insert(parts, nr == 1 and rls or (nr .. " roles")) end
+            filter = table.concat(parts, ", ")
         end
-        rank.classes:SetText("Classes: " .. (filter or "all"))
+        rank.classes:SetText("For: " .. (filter or "everyone"))
         if picker:IsShown() and picker.kind == "class" then
             local rows = selected and rank.classes.Rows(selected)
             if rows then
@@ -1506,8 +1534,18 @@ end
 
 -- addon compartment (the addons button by the minimap) -------------------------------------------
 
+-- Shift-click unlocks or locks the party frame, as in Buff Reminder
+local function ToggleLocked()
+    if setsMenu then setsMenu:Hide() end
+    OCC.SetUnlocked(not OCC.DB().unlocked)
+    OCC.Print(OCC.DB().unlocked and "Party frame unlocked. Drag the handle above it to move it."
+        or "Party frame locked.")
+end
+
 function OpcowsClickCast_OnAddonCompartmentClick(_, button)
-    if button == "RightButton" then
+    if IsShiftKeyDown() then
+        ToggleLocked()
+    elseif button == "RightButton" then
         ToggleSetsMenu()
     else
         OCC.ToggleConfig()
@@ -1519,6 +1557,8 @@ function OpcowsClickCast_OnAddonCompartmentEnter(_, button)
     GameTooltip:SetText("Opcow's Click Cast")
     GameTooltip:AddLine("Left-click: options", 1, 1, 1)
     GameTooltip:AddLine("Right-click: button sets", 1, 1, 1)
+    GameTooltip:AddLine(OCC.DB().unlocked and "Shift-click: lock the party frame"
+        or "Shift-click: unlock the party frame", 1, 1, 1)
     local cur = CurrentSet()
     GameTooltip:AddLine("Set: " .. (cur or "none") .. (OCC.Unsaved() and (cur and " (changed)" or " (not saved)")
         or ""), 0.5, 0.5, 0.5)
@@ -1570,7 +1610,9 @@ local function CreateMinimapButton()
     border:SetPoint("TOPLEFT")
 
     b:SetScript("OnClick", function(self, button)
-        if button == "RightButton" then
+        if IsShiftKeyDown() then
+            ToggleLocked()
+        elseif button == "RightButton" then
             ToggleSetsMenu(self)
         else
             if setsMenu then setsMenu:Hide() end

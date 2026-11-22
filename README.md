@@ -6,7 +6,7 @@ A World of Warcraft: Forever addon for click casting. It shows a party frame wit
 
 ## Buttons
 
-Open the options window with `/occ`, the minimap button or the addon compartment. Add a spell from your spellbook, add a macro, or drag either onto the list.
+Open the options window with `/occ`, the minimap button or the addon compartment. Shift-click either to unlock or lock the party frame. Add a spell from your spellbook, add a macro, or drag either onto the list.
 
 - **Left click** casts the spell at the rank you picked. **Highest** follows new ranks as you learn them. Click a spell in the list to pick its rank.
 - **Shift-click** has its own action, set on the Shift-click tab. **Auto** casts the same spell a rank lower. With Shift held, the buttons show what Shift-click will cast.
@@ -16,7 +16,7 @@ Open the options window with `/occ`, the minimap button or the addon compartment
 - **Remind** (spells only) marks a buff to keep up. Out of combat, a member missing that buff gets its icon beside their frame, and the button glows. Pick the glow (Pulse, Flash, Steady, Spell alert or None) with **Reminder glow** in the options. A buff from anyone counts, and so do the group versions, ex: Prayer of Fortitude for Power Word: Fortitude. Party buffs can't be read in combat, so reminders hide during a fight. Members who are dead, offline or out of sight are skipped.
 - **Reminder only** (with Remind) takes the button out of the row under each member. It shows beside a member's frame only while they're missing the buff, in place of the icon, and you click it there to cast. Good for buffs you cast now and then.
 - **Never downrank** makes a button always cast its own rank, on every click.
-- **Classes** shows a button only under members of the classes you pick, ex: Arcane Intellect under mana users.
+- **For** shows a button only under members of the classes you pick, ex: Arcane Intellect under mana users. In a group you can pick roles too, ex: Power Word: Shield under tanks.
 
 Each button shows the spell's cooldown. It also shows a swipe while your own buff or HoT from that spell is on the member, ex: Renew. A button turns red while the member has a debuff that stops you casting its spell on them, ex: Weakened Soul for Power Word: Shield, with a swipe showing when it wears off. A dispel spell's button (Dispel Magic, Cure Disease, Remove Curse, Cure Poison, Purify, Cleanse) gets a highlight in the debuff's colour while the member has a debuff it can remove, in combat too. Pick its look: Border, Thick border, Glow, Tint, Corner or Spell alert (the action bar's gold proc glow, whatever the colour).
 

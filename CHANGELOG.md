@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.30.0
+
+### Added
+
+- Shift-click the minimap button or the addon compartment entry to unlock or lock the party frame, as in Opcow's Buff Reminder.
+- Role filter: in a group, a button can show only under members of the roles you pick (Tank, Healer, Damage), ex: Power Word: Shield under tanks. Outside a group, or for a member with no role, it shows anyway. Pick them in the same list as the classes, from the button beside Rank (now "For: ..."), or `/occ role <n> <tank|healer|damage>` (`all` for every role).
+
 ## 0.29.0
 
 ### Added

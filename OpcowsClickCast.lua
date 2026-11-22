@@ -1660,6 +1660,31 @@ function OCC.ForClass(a, class)
     return a.classes[class] and true or false
 end
 
+-- the roles a button can be filtered to (a.roles = { HEALER = true, ... }, nil for every role)
+OCC.ROLES = { "TANK", "HEALER", "DAMAGER" }
+
+function OCC.RoleName(role)
+    local names = { TANK = TANK or "Tank", HEALER = HEALER or "Healer", DAMAGER = DAMAGER or "Damage" }
+    return names[role] or role
+end
+
+-- whether action a shows on a member with role: true when it has no filter, or the member has no
+-- role (not in a group, or none picked)
+function OCC.ForRole(a, role)
+    if not role or role == "NONE" or type(a.roles) ~= "table" or not next(a.roles) then return true end
+    return a.roles[role] and true or false
+end
+
+-- the group role of member frame m's unit, nil outside a group, for the target frame, or when it
+-- can't be read
+function OCC.MemberRole(m)
+    if m.isTarget or not IsInGroup() then return nil end
+    local u = m:GetAttribute("unit")
+    if type(u) ~= "string" then return nil end
+    local ok, role = pcall(UnitGroupRolesAssigned, u)
+    return ok and Known(role) or nil
+end
+
 -- the class of member frame m's unit, nil for the target frame or when it can't be read
 function OCC.MemberClass(m)
     if m.isTarget then return nil end
@@ -2450,8 +2475,9 @@ end
 
 -- lays out member frame m's bars, text and buttons in sizes d (see Dims). Self only buttons go on
 -- it only when isMe, and buttons filtered to classes only when the member's class is one of them
--- (class nil: all). new(m) makes a button. Returns m's buttons and how many are in use.
-local function LayoutMember(m, d, isMe, new, class)
+-- (class nil: all), and the same for roles. new(m) makes a button. Returns m's buttons and how many
+-- are in use.
+local function LayoutMember(m, d, isMe, new, class, role)
     local db = DB()
     MakeMember(m)
     m.health:SetHeight(d.health)
@@ -2487,9 +2513,9 @@ local function LayoutMember(m, d, isMe, new, class)
     -- everyone's frame is as wide as yours, self only buttons and all
     local n, skipped = 0, 0
     for _, a in ipairs(db.actions) do
-        if (a.self and not isMe) or not OCC.ForClass(a, class) then
+        if (a.self and not isMe) or not OCC.ForClass(a, class) or not OCC.ForRole(a, role) then
             -- counted only when your own frame shows it: a spell you don't know or a deleted macro shows
-            -- on no one, so it takes no room. A button for other classes takes its room too, so the
+            -- on no one, so it takes no room. A button for other classes or roles takes its room too, so the
             -- frames stay the same width.
             local usable
             if a.spell then
@@ -2736,7 +2762,14 @@ local function UpdatePreview()
     local above
     for i, m in ipairs(previewMembers) do
         local class = PREVIEW[i].you and Known(select(2, UnitClass("player"))) or PREVIEW[i].class
-        FillPreview(m, PREVIEW[i], LayoutMember(m, d, i == 1, PreviewButton, class))
+        -- the preview is a made-up group, so roles count: yours as FillPreview shows it
+        local role = PREVIEW[i].role
+        if PREVIEW[i].you then
+            local ok, r = pcall(UnitGroupRolesAssigned, "player")
+            role = ok and Known(r)
+            if not role or role == "NONE" then role = "HEALER" end
+        end
+        FillPreview(m, PREVIEW[i], LayoutMember(m, d, i == 1, PreviewButton, class, role))
         m:ClearAllPoints()
         if above then
             m:SetPoint("TOP", above, "BOTTOM", 0, -SPACING)
@@ -2789,7 +2822,7 @@ function OCC.Sync()
     for _, m in ipairs(frames) do
         -- self only buttons go on your own frame only
         m.isMe = IsMe(m)
-        local list, n = LayoutMember(m, d, m.isMe, NewButton, OCC.MemberClass(m))
+        local list, n = LayoutMember(m, d, m.isMe, NewButton, OCC.MemberClass(m), OCC.MemberRole(m))
         SetAuraUnit(m)
         for i = 1, #list do
             SetSwipe(m, i, list[i])
@@ -2934,6 +2967,17 @@ local function Describe(i, a)
         .. (a.remindOnly and a.spell and ", reminder only (beside the frame when missing)"
             or a.remind and ", reminds when missing" or "")
         .. (OCC.ClassesText(a) and (", for " .. OCC.ClassesText(a)) or "")
+        .. (OCC.RolesText(a) and (", for " .. OCC.RolesText(a) .. " in a group") or "")
+end
+
+-- the roles button a shows for, ex: "Tank, Healer", or nil when it shows for every role
+function OCC.RolesText(a)
+    if type(a.roles) ~= "table" or not next(a.roles) then return nil end
+    local names = {}
+    for _, r in ipairs(OCC.ROLES) do
+        if a.roles[r] then table.insert(names, OCC.RoleName(r)) end
+    end
+    return table.concat(names, ", ")
 end
 
 -- the classes button a shows for, ex: "Mage, Priest", or nil when it shows for everyone
@@ -3004,6 +3048,21 @@ function OCC.SetClass(i, class, on)
         a.classes = type(a.classes) == "table" and a.classes or {}
         a.classes[class] = on and true or nil
         if not next(a.classes) then a.classes = nil end
+    end
+    Changed()
+end
+
+-- button i shows under members with role too in a group, or no longer (on false). role nil: every
+-- role again. With no role ticked, or outside a group, it shows for everyone.
+function OCC.SetRole(i, role, on)
+    local a = DB().actions[i]
+    if not a then return end
+    if role == nil then
+        a.roles = nil
+    else
+        a.roles = type(a.roles) == "table" and a.roles or {}
+        a.roles[role] = on and true or nil
+        if not next(a.roles) then a.roles = nil end
     end
     Changed()
 end
@@ -3377,6 +3436,7 @@ local HELP = {
     "/occ remindonly <n> - spell button n isn't in the row: it shows beside members missing its buff, to click (out of combat)",
     "/occ nodownrank <n> - spell button n never casts a lower rank on right-click or shift-click",
     "/occ class <n> <class> - button n shows under that class too, or no longer; all = everyone",
+    "/occ role <n> <tank|healer|damage> - in a group, button n shows under that role too, or no longer; all = every role",
     "/occ perrow <n> - buttons in each row before the next, 0 = all in one row",
     "/occ spacing <n> - pixels between buttons, 0 to 30, 2 by default",
     "/occ width <n> - each member's frame width, 0 = 100, never narrower than its buttons",
@@ -3596,6 +3656,22 @@ SlashCmdList.OPCOWSCLICKCAST = function(msg)
             OCC.SetClass(n, class, not (a.classes and a.classes[class]))
         end
         Print(Describe(n, db.actions[n]))
+    elseif cmd == "role" and db.actions[tonumber(rest:match("^(%d+)") or "") or 0] then
+        local n = tonumber(rest:match("^(%d+)"))
+        local name = (rest:match("^%d+%s*(.*)$") or ""):upper():gsub("%s", "")
+        local a = db.actions[n]
+        if name == "" or name == "ALL" then
+            OCC.SetRole(n, nil)
+        else
+            local role = ({ TANK = "TANK", HEALER = "HEALER", HEAL = "HEALER", DAMAGER = "DAMAGER",
+                DAMAGE = "DAMAGER", DPS = "DAMAGER" })[name]
+            if not role then
+                Print("no role " .. name:lower() .. ". One of: tank, healer, damage, or all.")
+                return
+            end
+            OCC.SetRole(n, role, not (a.roles and a.roles[role]))
+        end
+        Print(Describe(n, db.actions[n]))
     elseif cmd == "perrow" and tonumber(rest) and tonumber(rest) >= 0 then
         db.perRow = math.floor(tonumber(rest))
         Print(db.perRow == 0 and "buttons all in one row." or ("%d buttons in each row."):format(db.perRow))
@@ -3718,6 +3794,13 @@ frame:SetScript("OnEvent", function(_, event)
         -- the header re-sorts itself, the icons are ours
         for _, m in ipairs(members) do
             if m.body then UpdateRole(m) end
+        end
+        -- buttons filtered to roles follow the new ones (after combat)
+        for _, a in ipairs(DB().actions) do
+            if type(a.roles) == "table" and next(a.roles) then
+                SyncSoon()
+                break
+            end
         end
     elseif event == "PLAYER_REGEN_DISABLED" then
         -- the buffs are secret now: the reminders hide until it ends
